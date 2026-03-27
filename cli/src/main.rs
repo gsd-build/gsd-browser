@@ -429,6 +429,39 @@ enum Commands {
         #[arg(long)]
         multiple: bool,
     },
+    /// Intercept network requests matching a URL pattern and respond with custom data
+    MockRoute {
+        /// URL pattern to intercept (glob, e.g. '**/api/users*')
+        #[arg(long)]
+        url: String,
+        /// HTTP status code for the mock response (default: 200)
+        #[arg(long, default_value = "200")]
+        status: u16,
+        /// Response body string
+        #[arg(long)]
+        body: Option<String>,
+        /// Content-Type header (default: auto-detect)
+        #[arg(long)]
+        content_type: Option<String>,
+        /// Response delay in milliseconds
+        #[arg(long)]
+        delay: Option<u64>,
+        /// Additional response headers as JSON object
+        #[arg(long)]
+        headers: Option<String>,
+    },
+    /// Block network requests matching URL patterns
+    BlockUrls {
+        /// URL patterns to block (glob syntax)
+        patterns: Vec<String>,
+    },
+    /// Remove all active route mocks and URL blocks
+    ClearRoutes,
+    /// Emulate a specific device (viewport, user agent, scale factor, touch)
+    EmulateDevice {
+        /// Device name (e.g. 'iPhone 15', 'Pixel 7') or 'list' for all presets
+        device: String,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -594,6 +627,17 @@ async fn main() {
             selector,
             multiple,
         } => cmd_extract(&cli, schema, selector.as_deref(), *multiple).await,
+        Commands::MockRoute {
+            url,
+            status,
+            body,
+            content_type,
+            delay,
+            headers,
+        } => cmd_mock_route(&cli, url, *status, body.as_deref(), content_type.as_deref(), *delay, headers.as_deref()).await,
+        Commands::BlockUrls { patterns } => cmd_block_urls(&cli, patterns).await,
+        Commands::ClearRoutes => cmd_clear_routes(&cli).await,
+        Commands::EmulateDevice { device } => cmd_emulate_device(&cli, device).await,
     };
 
     if let Err(e) = result {
@@ -1315,6 +1359,67 @@ async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: 
     }
     let resp = daemon_client::send_request("extract", params, cli.browser_path.as_deref()).await?;
     handle_response(cli, resp, output::format_text_extract)
+}
+
+async fn cmd_mock_route(
+    cli: &Cli,
+    url: &str,
+    status: u16,
+    body: Option<&str>,
+    content_type: Option<&str>,
+    delay: Option<u64>,
+    headers: Option<&str>,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "url": url,
+        "status": status,
+    });
+    if let Some(b) = body {
+        params["body"] = serde_json::json!(b);
+    }
+    if let Some(ct) = content_type {
+        params["content_type"] = serde_json::json!(ct);
+    }
+    if let Some(d) = delay {
+        params["delay"] = serde_json::json!(d);
+    }
+    if let Some(h) = headers {
+        let headers_value: serde_json::Value =
+            serde_json::from_str(h).map_err(|e| format!("invalid headers JSON: {e}"))?;
+        params["headers"] = headers_value;
+    }
+    let resp = daemon_client::send_request("mock_route", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_mock_route)
+}
+
+async fn cmd_block_urls(cli: &Cli, patterns: &[String]) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "block_urls",
+        serde_json::json!({"patterns": patterns}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_block_urls)
+}
+
+async fn cmd_clear_routes(cli: &Cli) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "clear_routes",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_clear_routes)
+}
+
+async fn cmd_emulate_device(cli: &Cli, device: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "emulate_device",
+        serde_json::json!({"device": device}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_emulate_device)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
