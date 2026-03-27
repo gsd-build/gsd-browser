@@ -173,14 +173,16 @@ pub async fn handle_check_injection(page: &Page, params: &Value) -> Result<Value
     let call_js = format!(
         r#"
         (() => {{
-            const includeHidden = {};
-            {}
+            const __btIncludeHidden = {};
+            return {}
         }})()
         "#,
         if include_hidden { "true" } else { "false" },
-        // Inline the scan logic, replacing arguments[0] with includeHidden
+        // Inline the scan logic, replacing arguments[0] with the outer variable name
+        // to avoid TDZ conflict with the inner `const includeHidden` declaration.
+        // The inner IIFE returns its result and we `return` it from the outer IIFE.
         INJECTION_SCAN_JS
-            .replace("arguments[0]", "includeHidden")
+            .replace("arguments[0]", "__btIncludeHidden")
             .trim_start_matches('\n')
     );
 
