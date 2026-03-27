@@ -1,3 +1,4 @@
+pub mod assert_cmd;
 pub mod inspect;
 pub mod interaction;
 pub mod navigate;

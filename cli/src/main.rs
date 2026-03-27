@@ -273,6 +273,18 @@ enum Commands {
         #[arg(long)]
         slowly: bool,
     },
+    /// Run one or more assertions against current page state
+    Assert {
+        /// JSON array of assertion checks
+        #[arg(long)]
+        checks: String,
+    },
+    /// Compare current page state against stored snapshot
+    Diff {
+        /// Compare against state from this action ID
+        #[arg(long)]
+        since: Option<u64>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -384,6 +396,8 @@ async fn main() {
             submit,
             slowly,
         } => cmd_fill_ref(&cli, ref_str, text, *clear_first, *submit, *slowly).await,
+        Commands::Assert { checks } => cmd_assert(&cli, checks).await,
+        Commands::Diff { since } => cmd_diff(&cli, *since).await,
     };
 
     if let Err(e) = result {
@@ -867,6 +881,29 @@ async fn cmd_fill_ref(
     )
     .await?;
     handle_response(cli, resp, output::format_text_ref_action)
+}
+
+async fn cmd_assert(cli: &Cli, checks: &str) -> CmdResult {
+    // Parse the checks JSON to validate it before sending
+    let checks_value: serde_json::Value =
+        serde_json::from_str(checks).map_err(|e| format!("invalid checks JSON: {e}"))?;
+    let resp = daemon_client::send_request(
+        "assert",
+        serde_json::json!({"checks": checks_value}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_assert)
+}
+
+async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(id) = since {
+        params["sinceActionId"] = serde_json::json!(id);
+    }
+    let resp =
+        daemon_client::send_request("diff", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_diff)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.

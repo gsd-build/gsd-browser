@@ -241,6 +241,82 @@ async fn handle_connection(
 }
 
 async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &DaemonState) -> DaemonResponse {
+    // Determine if this method should be timeline-recorded
+    let record_timeline = matches!(
+        req.method.as_str(),
+        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
+            | "hover" | "scroll" | "select_option" | "set_checked" | "drag"
+            | "snapshot" | "click_ref" | "hover_ref" | "fill_ref"
+            | "assert" | "diff" | "wait_for"
+    );
+
+    // Params summary for timeline (truncated to 80 chars)
+    let params_summary = if record_timeline {
+        let s = req.params.to_string();
+        if s.len() > 80 {
+            format!("{}…", &s[..79])
+        } else {
+            s
+        }
+    } else {
+        String::new()
+    };
+
+    // Record before-URL and begin action
+    let action_id = if record_timeline {
+        let before_url = match page.url().await {
+            Ok(Some(u)) => u,
+            _ => String::new(),
+        };
+        let mut timeline = state.timeline.lock().unwrap();
+        Some(timeline.begin_action(&req.method, &params_summary, &before_url))
+    } else {
+        None
+    };
+
+    // Also store before-state in DiffState for navigate/click/etc.
+    if matches!(
+        req.method.as_str(),
+        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
+            | "hover" | "click_ref" | "hover_ref" | "fill_ref"
+    ) {
+        let before_state = crate::capture::capture_compact_page_state(page, false).await;
+        let mut diff = state.diff.lock().unwrap();
+        diff.before = Some(before_state);
+    }
+
+    let response = dispatch_inner(req, page, logs, state).await;
+
+    // Finish action in timeline
+    if let Some(id) = action_id {
+        let after_url = match page.url().await {
+            Ok(Some(u)) => u,
+            _ => String::new(),
+        };
+        let (status, error) = if response.error.is_some() {
+            ("error", response.error.as_ref().map(|e| e.message.as_str()).unwrap_or(""))
+        } else {
+            ("ok", "")
+        };
+        let mut timeline = state.timeline.lock().unwrap();
+        timeline.finish_action(id, &after_url, status, error);
+    }
+
+    // Store after-state in DiffState for state-mutating methods
+    if matches!(
+        req.method.as_str(),
+        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
+            | "hover" | "click_ref" | "hover_ref" | "fill_ref"
+    ) {
+        let after_state = crate::capture::capture_compact_page_state(page, false).await;
+        let mut diff = state.diff.lock().unwrap();
+        diff.after = Some(after_state);
+    }
+
+    response
+}
+
+async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &DaemonState) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
         "health" => DaemonResponse::success(
@@ -415,6 +491,14 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
                 &msg,
                 json!({"retryHint": "Check ref targets an input/textarea element"}),
             ),
+        },
+        "assert" => match handlers::assert_cmd::handle_assert(page, logs, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "diff" => match handlers::assert_cmd::handle_diff(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         _ => DaemonResponse::error(
             req.id,
