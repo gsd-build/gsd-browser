@@ -16,6 +16,7 @@ nix = { version = "0.29", features = ["signal", "process", "fs"] }
 which = "7"
 thiserror = "2"
 tracing = "0.1"
+toml = "0.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
 aes-gcm = "0.10"

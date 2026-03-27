@@ -6,8 +6,8 @@ mod settle;
 mod state;
 
 use browser_tools_common::{
-    ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse, ERR_INTERNAL,
-    ERR_METHOD_NOT_FOUND,
+    config::Config, ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
+    ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
 };
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
@@ -45,9 +45,17 @@ async fn main() {
 }
 
 async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
+    // Load config (layers 1-4: defaults → user → project → env vars)
+    let config = Config::load();
+    info!("[browser-tools-daemon] config loaded (settle timeout={}ms, screenshot quality={})",
+        config.settle.timeout_ms, config.screenshot.quality);
+
     let browser_path_arg = std::env::args()
         .position(|a| a == "--browser-path")
         .and_then(|i| std::env::args().nth(i + 1));
+
+    // CLI --browser-path flag overrides config
+    let effective_browser_path = browser_path_arg.or_else(|| config.browser.path.clone());
 
     let session_arg = std::env::args()
         .position(|a| a == "--session")
@@ -103,7 +111,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // Discover and launch Chrome
-    let chrome_path = browser_tools_common::chrome::find_chrome(browser_path_arg.as_deref())
+    let chrome_path = browser_tools_common::chrome::find_chrome(effective_browser_path.as_deref())
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     info!(
         "[browser-tools-daemon] launching Chrome from {:?}",
