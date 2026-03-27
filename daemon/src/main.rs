@@ -354,6 +354,20 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> Daemon
                 json!({"retryHint": "Check selector is valid or try without --selector"}),
             ),
         }
+        "accessibility_tree" => {
+            match handlers::inspect::handle_accessibility_tree(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "find" => match handlers::inspect::handle_find(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "page_source" => match handlers::inspect::handle_page_source(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
