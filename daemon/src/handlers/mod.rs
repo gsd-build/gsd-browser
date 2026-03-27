@@ -1,11 +1,13 @@
 pub mod assert_cmd;
 pub mod batch;
+pub mod device;
 pub mod extract;
 pub mod forms;
 pub mod inspect;
 pub mod intent;
 pub mod interaction;
 pub mod navigate;
+pub mod network_mock;
 pub mod pages;
 pub mod pdf;
 pub mod refs;

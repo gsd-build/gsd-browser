@@ -8,6 +8,48 @@ use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+// ── Mock Route Types ──
+
+/// Whether a route mocks or blocks requests.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MockType {
+    Mock,
+    Block,
+}
+
+/// A single mock/block route entry.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct MockRoute {
+    pub id: u64,
+    pub pattern: String,
+    pub route_type: MockType,
+    pub status: u16,
+    pub body: String,
+    pub headers: HashMap<String, String>,
+    pub delay_ms: u64,
+    pub content_type: String,
+}
+
+/// Thread-safe store for active mock/block routes.
+pub struct MockRouteStore {
+    pub routes: Vec<MockRoute>,
+    pub next_id: u64,
+    pub fetch_enabled: bool,
+    pub listener_spawned: bool,
+}
+
+impl MockRouteStore {
+    pub fn new() -> Self {
+        Self {
+            routes: Vec::new(),
+            next_id: 1,
+            fetch_enabled: false,
+            listener_spawned: false,
+        }
+    }
+}
+
 /// Maximum number of action entries kept in the timeline FIFO.
 const MAX_TIMELINE_ENTRIES: usize = 60;
 
@@ -118,6 +160,7 @@ pub struct DaemonState {
     pub diff: Mutex<DiffState>,
     pub pages: Mutex<PageRegistry>,
     pub selected_frame: Mutex<Option<String>>,
+    pub mock_routes: Mutex<MockRouteStore>,
 }
 
 impl DaemonState {
@@ -128,6 +171,7 @@ impl DaemonState {
             diff: Mutex::new(DiffState::new()),
             pages: Mutex::new(PageRegistry::new()),
             selected_frame: Mutex::new(None),
+            mock_routes: Mutex::new(MockRouteStore::new()),
         }
     }
 }

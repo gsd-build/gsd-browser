@@ -1542,6 +1542,83 @@ pub fn format_text_extract(result: &Value) -> String {
     }
 }
 
+pub fn format_text_mock_route(result: &Value) -> String {
+    let route_id = result
+        .get("route_id")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let pattern = result
+        .get("pattern")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let status = result
+        .get("status")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(200);
+    format!("Mock route #{route_id} added: {pattern} → {status}")
+}
+
+pub fn format_text_block_urls(result: &Value) -> String {
+    let count = result
+        .get("blocked")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let patterns = result
+        .get("patterns")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    format!("Blocked {count} URL pattern(s): {patterns}")
+}
+
+pub fn format_text_clear_routes(result: &Value) -> String {
+    let cleared = result
+        .get("cleared")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    format!("Cleared {cleared} route(s)")
+}
+
+pub fn format_text_emulate_device(result: &Value) -> String {
+    // Handle "list" response
+    if let Some(devices) = result.get("devices").and_then(|v| v.as_array()) {
+        let mut lines = vec![format!("Available devices ({}):", devices.len())];
+        for d in devices {
+            let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+            let w = d.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+            let h = d.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+            let scale = d.get("deviceScaleFactor").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let mobile = d.get("mobile").and_then(|v| v.as_bool()).unwrap_or(false);
+            lines.push(format!(
+                "  {name}: {w}x{h} @{scale}x{}",
+                if mobile { " (mobile)" } else { "" }
+            ));
+        }
+        return lines.join("\n");
+    }
+
+    let device = result.get("device").and_then(|v| v.as_str()).unwrap_or("?");
+    let w = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+    let h = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let scale = result
+        .get("deviceScaleFactor")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let mobile = result
+        .get("mobile")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    format!(
+        "Emulating: {device} ({w}x{h} @{scale}x{})",
+        if mobile { ", mobile" } else { "" }
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

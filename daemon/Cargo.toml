@@ -17,3 +17,4 @@ tokio = { workspace = true, features = ["signal"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 image = { workspace = true }
+regex-lite = "0.1"

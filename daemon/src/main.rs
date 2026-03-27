@@ -592,6 +592,22 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "mock_route" => match handlers::network_mock::handle_mock_route(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "block_urls" => match handlers::network_mock::handle_block_urls(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "clear_routes" => match handlers::network_mock::handle_clear_routes(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "emulate_device" => match handlers::device::handle_emulate_device(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
