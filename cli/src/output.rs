@@ -1619,6 +1619,64 @@ pub fn format_text_emulate_device(result: &Value) -> String {
     )
 }
 
+pub fn format_text_save_state(result: &Value) -> String {
+    let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+    let cookies = result.get("cookies").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ls = result.get("localStorage").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ss = result.get("sessionStorage").and_then(|v| v.as_u64()).unwrap_or(0);
+    format!(
+        "State '{name}' saved → {path}\n  {cookies} cookies, {ls} localStorage, {ss} sessionStorage"
+    )
+}
+
+pub fn format_text_restore_state(result: &Value) -> String {
+    let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("?");
+    let cookies = result.get("cookies").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ls = result.get("localStorage").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ss = result.get("sessionStorage").and_then(|v| v.as_u64()).unwrap_or(0);
+    format!(
+        "State '{name}' restored: {cookies} cookies, {ls} localStorage, {ss} sessionStorage"
+    )
+}
+
+pub fn format_text_vault_save(result: &Value) -> String {
+    let profile = result.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
+    let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+    let username = result.get("username").and_then(|v| v.as_str()).unwrap_or("?");
+    format!("Vault profile '{profile}' saved (user: {username}, url: {url})")
+}
+
+pub fn format_text_vault_login(result: &Value) -> String {
+    let profile = result.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
+    let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("?");
+    let logged_in = result.get("logged_in").and_then(|v| v.as_bool()).unwrap_or(false);
+    if logged_in {
+        format!("Logged in with vault profile '{profile}' at {url}")
+    } else {
+        format!("Vault login failed for profile '{profile}' at {url}")
+    }
+}
+
+pub fn format_text_vault_list(result: &Value) -> String {
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let profiles = result
+        .get("profiles")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .unwrap_or_default();
+    if count == 0 {
+        "No vault profiles found.".to_string()
+    } else {
+        format!("Vault profiles ({count}): {profiles}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

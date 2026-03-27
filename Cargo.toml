@@ -18,6 +18,9 @@ thiserror = "2"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 image = { version = "0.25", default-features = false, features = ["png"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
 
 [profile.release]
 lto = true

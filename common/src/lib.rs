@@ -114,3 +114,29 @@ pub fn pid_path() -> std::path::PathBuf {
 pub fn lock_path() -> std::path::PathBuf {
     state_dir().join("daemon.lock")
 }
+
+/// Session-aware socket path. When session is Some, uses
+/// `~/.browser-tools/sessions/<name>/daemon.sock`.
+pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
+    match session {
+        Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
+        None => socket_path(),
+    }
+}
+
+/// Session-aware PID path. When session is Some, uses
+/// `~/.browser-tools/sessions/<name>/daemon.pid`.
+pub fn pid_path_for(session: Option<&str>) -> std::path::PathBuf {
+    match session {
+        Some(name) => state_dir().join("sessions").join(name).join("daemon.pid"),
+        None => pid_path(),
+    }
+}
+
+/// Session-aware lock path.
+pub fn lock_path_for(session: Option<&str>) -> std::path::PathBuf {
+    match session {
+        Some(name) => state_dir().join("sessions").join(name).join("daemon.lock"),
+        None => lock_path(),
+    }
+}

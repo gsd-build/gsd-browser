@@ -6,7 +6,7 @@ mod settle;
 mod state;
 
 use browser_tools_common::{
-    ipc, pid_path, socket_path, state_dir, DaemonRequest, DaemonResponse, ERR_INTERNAL,
+    ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse, ERR_INTERNAL,
     ERR_METHOD_NOT_FOUND,
 };
 use chromiumoxide::browser::{Browser, BrowserConfig};
@@ -49,17 +49,27 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         .position(|a| a == "--browser-path")
         .and_then(|i| std::env::args().nth(i + 1));
 
+    let session_arg = std::env::args()
+        .position(|a| a == "--session")
+        .and_then(|i| std::env::args().nth(i + 1));
+    let session = session_arg.as_deref();
+
     // Ensure state directory exists
     let state = state_dir();
     fs::create_dir_all(&state)?;
 
+    // For session mode, ensure session subdir exists
+    let sock_path = socket_path_for(session);
+    let pid_file_path = pid_path_for(session);
+    if let Some(parent) = sock_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
     // Clean up stale socket if exists
-    let sock_path = socket_path();
     if sock_path.exists() {
         // Check if old PID is alive
-        let pid_file = pid_path();
-        let stale = if pid_file.exists() {
-            let old_pid = fs::read_to_string(&pid_file)?.trim().parse::<i32>().ok();
+        let stale = if pid_file_path.exists() {
+            let old_pid = fs::read_to_string(&pid_file_path)?.trim().parse::<i32>().ok();
             match old_pid {
                 Some(pid) => {
                     // Check if process is alive via kill(pid, 0)
@@ -78,18 +88,18 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         if stale {
             warn!("[browser-tools-daemon] removing stale socket");
             let _ = fs::remove_file(&sock_path);
-            let _ = fs::remove_file(pid_path());
+            let _ = fs::remove_file(&pid_file_path);
         } else {
             return Err("daemon already running (socket exists and PID is alive)".into());
         }
     }
 
     // Write PID file
-    fs::write(pid_path(), process::id().to_string())?;
+    fs::write(&pid_file_path, process::id().to_string())?;
     info!(
         "[browser-tools-daemon] PID {} written to {:?}",
         process::id(),
-        pid_path()
+        pid_file_path
     );
 
     // Discover and launch Chrome
@@ -198,8 +208,8 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let _ = browser.close().await;
     let _ = browser.wait().await;
     handler_task.abort();
-    let _ = fs::remove_file(socket_path());
-    let _ = fs::remove_file(pid_path());
+    let _ = fs::remove_file(&sock_path);
+    let _ = fs::remove_file(&pid_file_path);
     info!("[browser-tools-daemon] shutdown complete");
 
     Ok(())
@@ -605,6 +615,26 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "emulate_device" => match handlers::device::handle_emulate_device(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "save_state" => match handlers::state_persist::handle_save_state(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "restore_state" => match handlers::state_persist::handle_restore_state(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "vault_save" => match handlers::auth_vault::handle_vault_save(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "vault_login" => match handlers::auth_vault::handle_vault_login(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "vault_list" => match handlers::auth_vault::handle_vault_list(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
