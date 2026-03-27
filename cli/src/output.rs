@@ -741,6 +741,108 @@ pub fn format_text_ref_action(result: &Value) -> String {
     lines.join("\n")
 }
 
+/// Format assert result in text mode — verified/failed with per-check results.
+pub fn format_text_assert(result: &Value) -> String {
+    let verified = result
+        .get("verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let summary = result
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let status = if verified { "✓ VERIFIED" } else { "✗ FAILED" };
+    let mut lines = vec![format!("Assert: {status} — {summary}")];
+
+    if let Some(checks) = result.get("checks").and_then(|v| v.as_array()) {
+        for check in checks {
+            let kind = check.get("kind").and_then(|v| v.as_str()).unwrap_or("?");
+            let passed = check
+                .get("passed")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let expected = check
+                .get("expected")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let actual = check
+                .get("actual")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let mark = if passed { "✓" } else { "✗" };
+            let selector = check
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let sel_part = if selector.is_empty() {
+                String::new()
+            } else {
+                format!(" [{selector}]")
+            };
+            lines.push(format!("  {mark} {kind}: expected={expected}, actual={actual}{sel_part}"));
+        }
+    }
+
+    if let Some(hint) = result.get("agentHint").and_then(|v| v.as_str()) {
+        lines.push(format!("\nHint: {hint}"));
+    }
+
+    lines.join("\n")
+}
+
+/// Format diff result in text mode — changed/unchanged with change list.
+pub fn format_text_diff(result: &Value) -> String {
+    let changed = result
+        .get("changed")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let summary = result
+        .get("summary")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let status = if changed { "CHANGED" } else { "UNCHANGED" };
+    let mut lines = vec![format!("Diff: {status} — {summary}")];
+
+    if let Some(changes) = result.get("changes").and_then(|v| v.as_array()) {
+        for change in changes {
+            let field = change
+                .get("field")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let before = change.get("before").map(|v| {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
+            }).unwrap_or_default();
+            let after = change.get("after").map(|v| {
+                if let Some(s) = v.as_str() {
+                    s.to_string()
+                } else {
+                    v.to_string()
+                }
+            }).unwrap_or_default();
+            let before_display = if before.len() > 50 {
+                format!("{}…", &before[..49])
+            } else {
+                before
+            };
+            let after_display = if after.len() > 50 {
+                format!("{}…", &after[..49])
+            } else {
+                after
+            };
+            lines.push(format!("  {field}: {before_display} → {after_display}"));
+        }
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
