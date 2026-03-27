@@ -231,6 +231,151 @@ pub fn format_text_eval(result: &Value) -> String {
         .to_string()
 }
 
+/// Generic formatter for interaction commands (click, type, press, hover, etc.).
+/// Shows the action taken plus a compact page summary.
+pub fn format_text_interaction(result: &Value) -> String {
+    let mut lines = Vec::new();
+
+    // Show what action happened based on the response keys
+    if let Some(clicked) = result.get("clicked") {
+        if let Some(sel) = clicked.get("selector").and_then(|v| v.as_str()) {
+            lines.push(format!("Clicked: {sel}"));
+        } else if let (Some(x), Some(y)) = (
+            clicked.get("x").and_then(|v| v.as_f64()),
+            clicked.get("y").and_then(|v| v.as_f64()),
+        ) {
+            lines.push(format!("Clicked: ({x}, {y})"));
+        }
+    }
+    if let Some(typed) = result.get("typed") {
+        let sel = typed
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let len = typed
+            .get("text_length")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let submitted = typed
+            .get("submitted")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let slowly = typed
+            .get("slowly")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let mode = if slowly { "slowly" } else { "atomic" };
+        lines.push(format!("Typed: {len} chars into {sel} ({mode})"));
+        if submitted {
+            lines.push("Submitted: Enter pressed".to_string());
+        }
+    }
+    if let Some(key) = result.get("pressed").and_then(|v| v.as_str()) {
+        lines.push(format!("Pressed: {key}"));
+    }
+    if let Some(sel) = result.get("hovered").and_then(|v| v.as_str()) {
+        lines.push(format!("Hovered: {sel}"));
+    }
+    if let Some(selected) = result.get("selected") {
+        let sel = selected
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let opt = selected
+            .get("option")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        lines.push(format!("Selected: \"{opt}\" in {sel}"));
+    }
+    if let Some(checked) = result.get("checked") {
+        let sel = checked
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let val = checked
+            .get("value")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        lines.push(format!("Checked: {sel} = {val}"));
+    }
+    if let Some(dragged) = result.get("dragged") {
+        let src = dragged
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let tgt = dragged
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        lines.push(format!("Dragged: {src} → {tgt}"));
+    }
+    if let Some(uploaded) = result.get("uploaded") {
+        let sel = uploaded
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let files = uploaded
+            .get("files")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        lines.push(format!("Uploaded: {files} file(s) to {sel}"));
+    }
+
+    // Show page summary
+    if let Some(state) = result.get("state") {
+        lines.push(String::new());
+        lines.push("Page summary:".to_string());
+        lines.push(format_compact_summary(state));
+    }
+
+    lines.join("\n")
+}
+
+/// Format scroll command output in text mode.
+pub fn format_text_scroll(result: &Value) -> String {
+    let mut lines = Vec::new();
+
+    if let Some(scroll) = result.get("scroll") {
+        let y = scroll.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let pct = scroll
+            .get("percentage")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let height = scroll
+            .get("height")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        let vp = scroll
+            .get("viewport_height")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.0);
+        lines.push(format!("Scroll position: {y}px ({pct}%)"));
+        lines.push(format!(
+            "Page height: {height}px, viewport: {vp}px"
+        ));
+    }
+
+    if let Some(state) = result.get("state") {
+        lines.push(String::new());
+        lines.push("Page summary:".to_string());
+        lines.push(format_compact_summary(state));
+    }
+
+    lines.join("\n")
+}
+
+/// Format set_viewport command output in text mode.
+pub fn format_text_viewport(result: &Value) -> String {
+    let width = result.get("width").and_then(|v| v.as_i64()).unwrap_or(0);
+    let height = result.get("height").and_then(|v| v.as_i64()).unwrap_or(0);
+    let preset = result
+        .get("preset")
+        .and_then(|v| v.as_str())
+        .unwrap_or("custom");
+    format!("Viewport: {width}x{height} ({preset})")
+}
+
 /// Format any result as pretty-printed JSON.
 pub fn format_json(result: &Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string())

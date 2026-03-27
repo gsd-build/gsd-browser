@@ -62,6 +62,93 @@ enum Commands {
         /// JavaScript expression to evaluate
         expression: String,
     },
+    /// Click an element by selector or coordinates
+    Click {
+        /// CSS selector of the element to click
+        selector: Option<String>,
+        /// X coordinate (use with --y for coordinate click)
+        #[arg(long)]
+        x: Option<f64>,
+        /// Y coordinate (use with --x for coordinate click)
+        #[arg(long)]
+        y: Option<f64>,
+    },
+    /// Type text into an input element
+    Type {
+        /// CSS selector of the input element
+        selector: String,
+        /// Text to type
+        text: String,
+        /// Type character-by-character instead of atomic fill
+        #[arg(long)]
+        slowly: bool,
+        /// Clear the field before typing
+        #[arg(long)]
+        clear_first: bool,
+        /// Press Enter after typing
+        #[arg(long)]
+        submit: bool,
+    },
+    /// Press a key or key combination (e.g. Enter, Meta+A)
+    Press {
+        /// Key name or combination (e.g. "Enter", "Meta+A", "Tab")
+        key: String,
+    },
+    /// Hover over an element
+    Hover {
+        /// CSS selector of the element to hover
+        selector: String,
+    },
+    /// Scroll the page up or down
+    Scroll {
+        /// Direction: "up" or "down"
+        #[arg(long)]
+        direction: String,
+        /// Pixels to scroll (default: 300)
+        #[arg(long, default_value = "300")]
+        amount: i32,
+    },
+    /// Select an option from a <select> dropdown
+    SelectOption {
+        /// CSS selector of the <select> element
+        selector: String,
+        /// Option label or value to select
+        option: String,
+    },
+    /// Set checkbox or radio button checked state
+    SetChecked {
+        /// CSS selector of the checkbox/radio element
+        selector: String,
+        /// Set to checked (true) or unchecked (false)
+        #[arg(long)]
+        checked: bool,
+    },
+    /// Drag an element to another element
+    Drag {
+        /// CSS selector of the source element
+        source: String,
+        /// CSS selector of the target element
+        target: String,
+    },
+    /// Set the viewport size (preset or custom dimensions)
+    SetViewport {
+        /// Preset: mobile, tablet, desktop, wide
+        #[arg(long)]
+        preset: Option<String>,
+        /// Custom width in pixels
+        #[arg(long)]
+        width: Option<u32>,
+        /// Custom height in pixels
+        #[arg(long)]
+        height: Option<u32>,
+    },
+    /// Set files on a file input element
+    UploadFile {
+        /// CSS selector of the <input type="file"> element
+        selector: String,
+        /// File paths to upload
+        files: Vec<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -97,6 +184,30 @@ async fn main() {
         Commands::Network { no_clear, filter } => cmd_network(&cli, *no_clear, filter).await,
         Commands::Dialog { no_clear } => cmd_dialog(&cli, *no_clear).await,
         Commands::Eval { expression } => cmd_eval(&cli, expression).await,
+        Commands::Click { selector, x, y } => cmd_click(&cli, selector.as_deref(), *x, *y).await,
+        Commands::Type {
+            selector,
+            text,
+            slowly,
+            clear_first,
+            submit,
+        } => cmd_type(&cli, selector, text, *slowly, *clear_first, *submit).await,
+        Commands::Press { key } => cmd_press(&cli, key).await,
+        Commands::Hover { selector } => cmd_hover(&cli, selector).await,
+        Commands::Scroll { direction, amount } => cmd_scroll(&cli, direction, *amount).await,
+        Commands::SelectOption { selector, option } => {
+            cmd_select_option(&cli, selector, option).await
+        }
+        Commands::SetChecked { selector, checked } => {
+            cmd_set_checked(&cli, selector, *checked).await
+        }
+        Commands::Drag { source, target } => cmd_drag(&cli, source, target).await,
+        Commands::SetViewport {
+            preset,
+            width,
+            height,
+        } => cmd_set_viewport(&cli, preset.as_deref(), *width, *height).await,
+        Commands::UploadFile { selector, files } => cmd_upload_file(&cli, selector, files).await,
     };
 
     if let Err(e) = result {
@@ -236,6 +347,135 @@ async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, output::format_text_eval)
+}
+
+async fn cmd_click(cli: &Cli, selector: Option<&str>, x: Option<f64>, y: Option<f64>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    if let Some(xv) = x {
+        params["x"] = serde_json::json!(xv);
+    }
+    if let Some(yv) = y {
+        params["y"] = serde_json::json!(yv);
+    }
+    let resp = daemon_client::send_request("click", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_type(
+    cli: &Cli,
+    selector: &str,
+    text: &str,
+    slowly: bool,
+    clear_first: bool,
+    submit: bool,
+) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "type",
+        serde_json::json!({
+            "selector": selector,
+            "text": text,
+            "slowly": slowly,
+            "clear_first": clear_first,
+            "submit": submit,
+        }),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_press(cli: &Cli, key: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "press",
+        serde_json::json!({"key": key}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_hover(cli: &Cli, selector: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "hover",
+        serde_json::json!({"selector": selector}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_scroll(cli: &Cli, direction: &str, amount: i32) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "scroll",
+        serde_json::json!({"direction": direction, "amount": amount}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_scroll)
+}
+
+async fn cmd_select_option(cli: &Cli, selector: &str, option: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "select_option",
+        serde_json::json!({"selector": selector, "option": option}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_set_checked(cli: &Cli, selector: &str, checked: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "set_checked",
+        serde_json::json!({"selector": selector, "checked": checked}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_drag(cli: &Cli, source: &str, target: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "drag",
+        serde_json::json!({"source": source, "target": target}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_set_viewport(
+    cli: &Cli,
+    preset: Option<&str>,
+    width: Option<u32>,
+    height: Option<u32>,
+) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(p) = preset {
+        params["preset"] = serde_json::json!(p);
+    }
+    if let Some(w) = width {
+        params["width"] = serde_json::json!(w);
+    }
+    if let Some(h) = height {
+        params["height"] = serde_json::json!(h);
+    }
+    let resp =
+        daemon_client::send_request("set_viewport", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_viewport)
+}
+
+async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "upload_file",
+        serde_json::json!({"selector": selector, "files": files}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_interaction)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
