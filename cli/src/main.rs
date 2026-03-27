@@ -200,6 +200,29 @@ enum Commands {
         #[arg(long)]
         selector: Option<String>,
     },
+    /// Wait for a condition before continuing
+    WaitFor {
+        /// Condition: selector_visible, selector_hidden, url_contains, network_idle,
+        /// delay, text_visible, text_hidden, request_completed, console_message,
+        /// element_count, region_stable
+        #[arg(long)]
+        condition: String,
+        /// Condition-specific value (selector, text, URL substring, delay ms)
+        #[arg(long)]
+        value: Option<String>,
+        /// Threshold for element_count (e.g. ">=3", "==0", "<5")
+        #[arg(long)]
+        threshold: Option<String>,
+        /// Maximum wait time in milliseconds (default: 10000)
+        #[arg(long)]
+        timeout: Option<u64>,
+    },
+    /// Query the action timeline
+    Timeline {
+        /// Write timeline to disk as JSON
+        #[arg(long)]
+        write_to_disk: bool,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -288,6 +311,13 @@ async fn main() {
             limit,
         } => cmd_find(&cli, role.as_deref(), text.as_deref(), selector.as_deref(), *limit).await,
         Commands::PageSource { selector } => cmd_page_source(&cli, selector.as_deref()).await,
+        Commands::WaitFor {
+            condition,
+            value,
+            threshold,
+            timeout,
+        } => cmd_wait_for(&cli, condition, value.as_deref(), threshold.as_deref(), *timeout).await,
+        Commands::Timeline { write_to_disk } => cmd_timeline(&cli, *write_to_disk).await,
     };
 
     if let Err(e) = result {
@@ -664,6 +694,38 @@ async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
     let resp =
         daemon_client::send_request("page_source", params, cli.browser_path.as_deref()).await?;
     handle_response(cli, resp, output::format_text_page_source)
+}
+
+async fn cmd_wait_for(
+    cli: &Cli,
+    condition: &str,
+    value: Option<&str>,
+    threshold: Option<&str>,
+    timeout: Option<u64>,
+) -> CmdResult {
+    let mut params = serde_json::json!({"condition": condition});
+    if let Some(v) = value {
+        params["value"] = serde_json::json!(v);
+    }
+    if let Some(t) = threshold {
+        params["threshold"] = serde_json::json!(t);
+    }
+    if let Some(ms) = timeout {
+        params["timeout"] = serde_json::json!(ms);
+    }
+    let resp =
+        daemon_client::send_request("wait_for", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_wait_for)
+}
+
+async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "timeline",
+        serde_json::json!({"write_to_disk": write_to_disk}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_timeline)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.

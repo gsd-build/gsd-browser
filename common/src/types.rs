@@ -121,6 +121,37 @@ pub struct NetworkLogEntry {
     pub response_body: String,
 }
 
+// ── Action Timeline Entry ──
+
+/// An entry in the action timeline, recording a single tool invocation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionEntry {
+    pub id: u64,
+    pub tool: String,
+    #[serde(default)]
+    pub params_summary: String,
+    pub started_at: f64,
+    #[serde(default)]
+    pub finished_at: f64,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub before_url: String,
+    #[serde(default)]
+    pub after_url: String,
+    #[serde(default)]
+    pub verification_summary: String,
+    #[serde(default)]
+    pub warning_summary: String,
+    #[serde(default)]
+    pub diff_summary: String,
+    #[serde(default)]
+    pub changed: bool,
+    #[serde(default)]
+    pub error: String,
+}
+
 /// A dialog event captured from Page.javascriptDialogOpening.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

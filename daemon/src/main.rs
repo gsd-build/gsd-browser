@@ -3,6 +3,7 @@ mod handlers;
 mod helpers;
 mod logs;
 mod settle;
+mod state;
 
 use browser_tools_common::{
     ipc, pid_path, socket_path, state_dir, DaemonRequest, DaemonResponse, ERR_INTERNAL,
@@ -16,6 +17,7 @@ use chromiumoxide::Page;
 use futures::StreamExt;
 use logs::DaemonLogs;
 use serde_json::json;
+use state::DaemonState;
 use std::fs;
 use std::process;
 use std::sync::Arc;
@@ -144,6 +146,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create log buffers and spawn event listeners
     let daemon_logs = Arc::new(DaemonLogs::new());
+    let daemon_state = Arc::new(DaemonState::new());
     logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
@@ -172,7 +175,8 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                         info!("[browser-tools-daemon] connection accepted");
                         let page = Arc::clone(&page);
                         let logs = Arc::clone(&daemon_logs);
-                        tokio::spawn(handle_connection(stream, page, logs));
+                        let state = Arc::clone(&daemon_state);
+                        tokio::spawn(handle_connection(stream, page, logs, state));
                     }
                     Err(e) => {
                         error!("[browser-tools-daemon] accept error: {e}");
@@ -202,6 +206,7 @@ async fn handle_connection(
     mut stream: tokio::net::UnixStream,
     page: Arc<Page>,
     logs: Arc<DaemonLogs>,
+    state: Arc<DaemonState>,
 ) {
     let raw = match ipc::read_message(&mut stream).await {
         Ok(data) if data.is_empty() => return,
@@ -227,7 +232,7 @@ async fn handle_connection(
         request.method, request.id
     );
 
-    let response = dispatch(&request, &page, &logs).await;
+    let response = dispatch(&request, &page, &logs, &state).await;
 
     let payload = serde_json::to_vec(&response).unwrap();
     if let Err(e) = ipc::write_message(&mut stream, &payload).await {
@@ -235,7 +240,7 @@ async fn handle_connection(
     }
 }
 
-async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> DaemonResponse {
+async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &DaemonState) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
         "health" => DaemonResponse::success(
@@ -365,6 +370,14 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> Daemon
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "page_source" => match handlers::inspect::handle_page_source(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "wait_for" => match handlers::wait::handle_wait_for(page, logs, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "timeline" => match handlers::timeline::handle_timeline(state, &req.params) {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
