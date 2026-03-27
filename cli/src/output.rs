@@ -402,6 +402,108 @@ pub fn format_text_screenshot(result: &Value) -> String {
     out
 }
 
+/// Format accessibility tree in text mode — print the indented tree with a node count footer.
+pub fn format_text_accessibility_tree(result: &Value) -> String {
+    let tree = result
+        .get("tree")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let node_count = result
+        .get("nodeCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let truncated = result
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if let Some(error) = result.get("error").and_then(|v| v.as_str()) {
+        return format!("Error: {error}");
+    }
+
+    let mut out = tree.to_string();
+    out.push_str(&format!("\n\n{node_count} nodes"));
+    if truncated {
+        out.push_str(" (truncated — use --max-count to increase)");
+    }
+    out
+}
+
+/// Format find results in text mode — one element per line: `[role] name (selector_hint)`.
+pub fn format_text_find(result: &Value) -> String {
+    let elements = result.get("elements").and_then(|v| v.as_array());
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let truncated = result
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if let Some(error) = result.get("error").and_then(|v| v.as_str()) {
+        return format!("Error: {error}");
+    }
+
+    match elements {
+        Some(elements) if !elements.is_empty() => {
+            let lines: Vec<String> = elements
+                .iter()
+                .map(|e| {
+                    let role = e.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                    let name = e.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let hint = e
+                        .get("selector_hint")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let tag = e.get("tag").and_then(|v| v.as_str()).unwrap_or("");
+                    let visible = e
+                        .get("visible")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(true);
+
+                    let role_display = if role.is_empty() { tag } else { role };
+                    let vis = if !visible { " [hidden]" } else { "" };
+
+                    if hint.is_empty() {
+                        format!("[{role_display}] {name}{vis}")
+                    } else {
+                        format!("[{role_display}] {name} ({hint}){vis}")
+                    }
+                })
+                .collect();
+
+            let mut out = lines.join("\n");
+            out.push_str(&format!("\n\n{count} elements"));
+            if truncated {
+                out.push_str(" (truncated — use --limit to increase)");
+            }
+            out
+        }
+        _ => "No matching elements found".to_string(),
+    }
+}
+
+/// Format page source in text mode — print HTML directly (truncated to 10KB in text mode).
+pub fn format_text_page_source(result: &Value) -> String {
+    let html = result.get("html").and_then(|v| v.as_str()).unwrap_or("");
+    let length = result.get("length").and_then(|v| v.as_u64()).unwrap_or(0);
+    let truncated = result
+        .get("truncated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    // In text mode, further truncate to 10KB for terminal readability
+    const TEXT_MAX: usize = 10 * 1024;
+    if html.len() > TEXT_MAX {
+        let truncated_html = &html[..TEXT_MAX];
+        format!(
+            "{truncated_html}\n\n... [truncated at 10KB of {length} bytes — use --json for full output]"
+        )
+    } else if truncated {
+        format!("{html}\n\n... [truncated at 200KB of {length} bytes]")
+    } else {
+        html.to_string()
+    }
+}
+
 /// Format any result as pretty-printed JSON.
 pub fn format_json(result: &Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string())

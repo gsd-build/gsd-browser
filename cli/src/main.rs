@@ -167,6 +167,39 @@ enum Commands {
         #[arg(long, default_value = "jpeg")]
         format: String,
     },
+    /// Get the accessibility tree of the page (roles, names, states)
+    AccessibilityTree {
+        /// CSS selector to scope the tree
+        #[arg(long)]
+        selector: Option<String>,
+        /// Maximum tree depth (default: 10)
+        #[arg(long, default_value = "10")]
+        max_depth: u32,
+        /// Maximum elements to include (default: 100)
+        #[arg(long, default_value = "100")]
+        max_count: u32,
+    },
+    /// Find elements by role, text content, or CSS selector
+    Find {
+        /// ARIA role to match (e.g. link, button, textbox)
+        #[arg(long)]
+        role: Option<String>,
+        /// Text content to match (case-insensitive contains)
+        #[arg(long)]
+        text: Option<String>,
+        /// CSS selector to scope search
+        #[arg(long)]
+        selector: Option<String>,
+        /// Maximum elements to return (default: 20)
+        #[arg(long, default_value = "20")]
+        limit: u32,
+    },
+    /// Get raw HTML source of the page or a specific element
+    PageSource {
+        /// CSS selector to scope the source
+        #[arg(long)]
+        selector: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -243,6 +276,18 @@ async fn main() {
             )
             .await
         }
+        Commands::AccessibilityTree {
+            selector,
+            max_depth,
+            max_count,
+        } => cmd_accessibility_tree(&cli, selector.as_deref(), *max_depth, *max_count).await,
+        Commands::Find {
+            role,
+            text,
+            selector,
+            limit,
+        } => cmd_find(&cli, role.as_deref(), text.as_deref(), selector.as_deref(), *limit).await,
+        Commands::PageSource { selector } => cmd_page_source(&cli, selector.as_deref()).await,
     };
 
     if let Err(e) = result {
@@ -569,6 +614,56 @@ async fn cmd_screenshot(
     }
 
     Ok(())
+}
+
+async fn cmd_accessibility_tree(
+    cli: &Cli,
+    selector: Option<&str>,
+    max_depth: u32,
+    max_count: u32,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "max_depth": max_depth,
+        "max_count": max_count,
+    });
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp = daemon_client::send_request("accessibility_tree", params, cli.browser_path.as_deref())
+        .await?;
+    handle_response(cli, resp, output::format_text_accessibility_tree)
+}
+
+async fn cmd_find(
+    cli: &Cli,
+    role: Option<&str>,
+    text: Option<&str>,
+    selector: Option<&str>,
+    limit: u32,
+) -> CmdResult {
+    let mut params = serde_json::json!({"limit": limit});
+    if let Some(r) = role {
+        params["role"] = serde_json::json!(r);
+    }
+    if let Some(t) = text {
+        params["text"] = serde_json::json!(t);
+    }
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp =
+        daemon_client::send_request("find", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_find)
+}
+
+async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp =
+        daemon_client::send_request("page_source", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_page_source)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
