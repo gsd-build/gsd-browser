@@ -1389,6 +1389,159 @@ pub fn format_text_debug_bundle(result: &Value) -> String {
     lines.join("\n")
 }
 
+/// Format visual diff result in text mode.
+pub fn format_text_visual_diff(result: &Value) -> String {
+    let status = result
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let similarity = result
+        .get("similarity")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let diff_count = result
+        .get("diffPixelCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let baseline_path = result
+        .get("baselinePath")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    let mut lines = vec![format!("Visual diff: {status}")];
+    lines.push(format!("Similarity: {:.2}%", similarity * 100.0));
+    lines.push(format!("Diff pixels: {diff_count}"));
+    lines.push(format!("Baseline: {baseline_path}"));
+
+    if let Some(diff_path) = result.get("diffPath").and_then(|v| v.as_str()) {
+        lines.push(format!("Diff image: {diff_path}"));
+    }
+
+    if let Some(w) = result.get("width").and_then(|v| v.as_u64()) {
+        let h = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+        lines.push(format!("Size: {w}x{h}"));
+    }
+
+    lines.join("\n")
+}
+
+/// Format zoom region result in text mode.
+pub fn format_text_zoom_region(result: &Value) -> String {
+    let width = result
+        .get("width")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let height = result
+        .get("height")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let scale = result
+        .get("scale")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(1.0);
+    let byte_len = result
+        .get("byteLength")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut lines = vec![format!("Zoom region captured: {width}x{height} (scale: {scale}x)")];
+    lines.push(format!("Size: {} bytes", byte_len));
+
+    if let Some(region) = result.get("region") {
+        let rx = region.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let ry = region.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let rw = region.get("width").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let rh = region.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        lines.push(format!("Region: ({rx}, {ry}) {rw}x{rh}"));
+    }
+
+    // Include base64 data hint (truncated for readability)
+    if let Some(data) = result.get("data").and_then(|v| v.as_str()) {
+        if data.len() > 40 {
+            lines.push(format!("Data: {}... ({} chars)", &data[..40], data.len()));
+        } else {
+            lines.push(format!("Data: {data}"));
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format save PDF result in text mode.
+pub fn format_text_save_pdf(result: &Value) -> String {
+    let path = result
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let format_str = result
+        .get("format")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let byte_len = result
+        .get("byteLength")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let paper_size = result
+        .get("paperSize")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+
+    let kb = byte_len as f64 / 1024.0;
+    format!("PDF saved: {path}\nFormat: {format_str} ({paper_size})\nSize: {kb:.1} KB ({byte_len} bytes)")
+}
+
+/// Format extract result in text mode.
+pub fn format_text_extract(result: &Value) -> String {
+    let multiple = result
+        .get("multiple")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if multiple {
+        let count = result
+            .get("count")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let mut lines = vec![format!("Extracted {count} items")];
+
+        if let Some(data) = result.get("data").and_then(|v| v.as_array()) {
+            for (i, item) in data.iter().enumerate().take(10) {
+                lines.push(format!("  [{i}]: {}", serde_json::to_string(item).unwrap_or_default()));
+            }
+            if data.len() > 10 {
+                lines.push(format!("  ... and {} more", data.len() - 10));
+            }
+        }
+
+        lines.join("\n")
+    } else {
+        let field_count = result
+            .get("fieldCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let mut lines = vec![format!("Extracted {field_count} fields")];
+
+        if let Some(data) = result.get("data").and_then(|v| v.as_object()) {
+            for (key, val) in data {
+                let val_str = match val {
+                    Value::String(s) => {
+                        if s.len() > 80 {
+                            format!("\"{}...\"", &s[..77])
+                        } else {
+                            format!("\"{s}\"")
+                        }
+                    }
+                    Value::Null => "null".to_string(),
+                    _ => val.to_string(),
+                };
+                lines.push(format!("  {key}: {val_str}"));
+            }
+        }
+
+        lines.join("\n")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
