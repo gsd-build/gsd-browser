@@ -1,4 +1,5 @@
 mod daemon_client;
+mod output;
 
 use clap::{Parser, Subcommand};
 
@@ -86,8 +87,6 @@ async fn main() {
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
 
 async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
-    // When invoked as `browser-tools daemon start`, we ARE the daemon launcher.
-    // Fork off the actual daemon process.
     daemon_client::start_daemon(cli.browser_path.as_deref()).await?;
     if cli.json {
         println!("{}", serde_json::json!({"status": "started"}));
@@ -113,15 +112,26 @@ async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
             .await?;
     if let Some(result) = resp.result {
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            println!("{}", output::format_json(&result));
         } else {
-            println!("Daemon: {}", result.get("status").and_then(|v| v.as_str()).unwrap_or("unknown"));
+            println!(
+                "Daemon: {}",
+                result
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown")
+            );
             if let Some(pid) = result.get("pid") {
                 println!("PID: {pid}");
             }
         }
     } else if let Some(err) = resp.error {
-        return Err(format!("daemon error ({}): {}", err.code, err.message).into());
+        if cli.json {
+            eprintln!("{}", output::format_error_json(&err));
+        } else {
+            eprintln!("{}", output::format_error_text(&err));
+        }
+        std::process::exit(1);
     }
     Ok(())
 }
@@ -133,52 +143,49 @@ async fn cmd_navigate(cli: &Cli, url: &str) -> CmdResult {
         cli.browser_path.as_deref(),
     )
     .await?;
-    print_response(cli, resp)
+    handle_response(cli, resp, output::format_text_navigate)
 }
 
 async fn cmd_back(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("back", serde_json::json!({}), cli.browser_path.as_deref())
             .await?;
-    print_response(cli, resp)
+    handle_response(cli, resp, output::format_text_back)
 }
 
 async fn cmd_forward(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("forward", serde_json::json!({}), cli.browser_path.as_deref())
             .await?;
-    print_response(cli, resp)
+    handle_response(cli, resp, output::format_text_forward)
 }
 
 async fn cmd_reload(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("reload", serde_json::json!({}), cli.browser_path.as_deref())
             .await?;
-    print_response(cli, resp)
+    handle_response(cli, resp, output::format_text_reload)
 }
 
-fn print_response(
+/// Generic response handler — delegates to the appropriate formatter based on --json flag.
+fn handle_response(
     cli: &Cli,
     resp: browser_tools_common::DaemonResponse,
+    text_formatter: fn(&serde_json::Value) -> String,
 ) -> CmdResult {
     if let Some(err) = resp.error {
-        return Err(format!("daemon error ({}): {}", err.code, err.message).into());
+        if cli.json {
+            eprintln!("{}", output::format_error_json(&err));
+        } else {
+            eprintln!("{}", output::format_error_text(&err));
+        }
+        std::process::exit(1);
     }
     if let Some(result) = resp.result {
         if cli.json {
-            println!("{}", serde_json::to_string_pretty(&result)?);
+            println!("{}", output::format_json(&result));
         } else {
-            // Text mode: display key fields
-            if let Some(title) = result.get("title").and_then(|v| v.as_str()) {
-                println!("Title: {title}");
-            }
-            if let Some(url) = result.get("url").and_then(|v| v.as_str()) {
-                println!("URL: {url}");
-            }
-            // Fallback for unknown result shapes
-            if result.get("title").is_none() && result.get("url").is_none() {
-                println!("{}", serde_json::to_string_pretty(&result)?);
-            }
+            println!("{}", text_formatter(&result));
         }
     }
     Ok(())
