@@ -843,6 +843,64 @@ pub fn format_text_diff(result: &Value) -> String {
     lines.join("\n")
 }
 
+/// Format batch result in text mode — step-by-step results with summary.
+pub fn format_text_batch(result: &Value) -> String {
+    let total = result
+        .get("totalSteps")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let passed = result
+        .get("passedSteps")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut lines = vec![format!("Batch: {passed}/{total} steps passed")];
+
+    // Per-step results
+    if let Some(steps) = result.get("steps").and_then(|v| v.as_array()) {
+        for step in steps {
+            let index = step.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+            let action = step
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let status = step
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
+            let mark = if status == "pass" { "✓" } else { "✗" };
+
+            let detail = if status == "fail" {
+                step.get("error")
+                    .and_then(|v| v.as_str())
+                    .map(|e| format!(" — {e}"))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+
+            lines.push(format!("  {mark} [{index}] {action}{detail}"));
+        }
+    }
+
+    // Failed step info
+    if let Some(fs) = result.get("failedStep") {
+        let action = fs.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+        let index = fs.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+        let error = fs.get("error").and_then(|v| v.as_str()).unwrap_or("");
+        lines.push(format!("\n⚠ Stopped at step [{index}] {action}: {error}"));
+    }
+
+    // Final summary
+    if let Some(summary) = result.get("finalSummary") {
+        lines.push(String::new());
+        lines.push("Final page state:".to_string());
+        lines.push(format_compact_summary(summary));
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

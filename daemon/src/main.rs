@@ -247,7 +247,7 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
         "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
             | "hover" | "scroll" | "select_option" | "set_checked" | "drag"
             | "snapshot" | "click_ref" | "hover_ref" | "fill_ref"
-            | "assert" | "diff" | "wait_for"
+            | "assert" | "diff" | "wait_for" | "batch"
     );
 
     // Params summary for timeline (truncated to 80 chars)
@@ -497,6 +497,10 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "diff" => match handlers::assert_cmd::handle_diff(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "batch" => match handlers::batch::handle_batch(page, logs, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
