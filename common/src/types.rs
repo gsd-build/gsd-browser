@@ -90,6 +90,52 @@ impl Default for SettleOptions {
     }
 }
 
+// ── Log Entry Types ──
+
+/// A console log entry captured from Runtime.consoleAPICalled or Runtime.exceptionThrown.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConsoleLogEntry {
+    pub log_type: String,
+    pub text: String,
+    pub timestamp: f64,
+    #[serde(default)]
+    pub url: String,
+}
+
+/// A network log entry captured from Network.responseReceived or Network.loadingFailed.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NetworkLogEntry {
+    pub method: String,
+    pub url: String,
+    #[serde(default)]
+    pub status: u32,
+    pub resource_type: String,
+    pub timestamp: f64,
+    #[serde(default)]
+    pub failed: bool,
+    #[serde(default)]
+    pub failure_text: String,
+    #[serde(default)]
+    pub response_body: String,
+}
+
+/// A dialog event captured from Page.javascriptDialogOpening.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DialogLogEntry {
+    pub dialog_type: String,
+    pub message: String,
+    pub timestamp: f64,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub default_value: String,
+    #[serde(default)]
+    pub accepted: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

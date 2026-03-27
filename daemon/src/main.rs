@@ -1,6 +1,7 @@
 mod capture;
 mod handlers;
 mod helpers;
+mod logs;
 mod settle;
 
 use browser_tools_common::{
@@ -8,14 +9,18 @@ use browser_tools_common::{
     ERR_METHOD_NOT_FOUND,
 };
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
+use chromiumoxide::cdp::browser_protocol::page::EnableParams as PageEnableParams;
+use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParams;
 use chromiumoxide::Page;
 use futures::StreamExt;
+use logs::DaemonLogs;
 use serde_json::json;
 use std::fs;
 use std::process;
 use std::sync::Arc;
 use tokio::net::UnixListener;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[tokio::main]
 async fn main() {
@@ -119,6 +124,32 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     settle::ensure_mutation_counter(&page).await;
     info!("[browser-tools-daemon] browser helpers injected, mutation counter installed");
 
+    // Enable CDP domains for event listening
+    if let Err(e) = page.execute(RuntimeEnableParams::default()).await {
+        warn!("[browser-tools-daemon] Runtime.enable failed (non-fatal): {e}");
+    } else {
+        debug!("[browser-tools-daemon] Runtime domain enabled");
+    }
+    if let Err(e) = page.execute(NetworkEnableParams::default()).await {
+        warn!("[browser-tools-daemon] Network.enable failed (non-fatal): {e}");
+    } else {
+        debug!("[browser-tools-daemon] Network domain enabled");
+    }
+    if let Err(e) = page.execute(PageEnableParams::default()).await {
+        warn!("[browser-tools-daemon] Page.enable failed (non-fatal): {e}");
+    } else {
+        debug!("[browser-tools-daemon] Page domain enabled");
+    }
+    info!("[browser-tools-daemon] CDP domains enabled");
+
+    // Create log buffers and spawn event listeners
+    let daemon_logs = Arc::new(DaemonLogs::new());
+    logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
+    logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
+    logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
+    logs::spawn_dialog_listener(&page, daemon_logs.dialog.clone()).await;
+    info!("[browser-tools-daemon] event listeners spawned");
+
     // Wrap page in Arc for sharing across connection tasks
     let page = Arc::new(page);
 
@@ -140,7 +171,8 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                     Ok((stream, _addr)) => {
                         info!("[browser-tools-daemon] connection accepted");
                         let page = Arc::clone(&page);
-                        tokio::spawn(handle_connection(stream, page));
+                        let logs = Arc::clone(&daemon_logs);
+                        tokio::spawn(handle_connection(stream, page, logs));
                     }
                     Err(e) => {
                         error!("[browser-tools-daemon] accept error: {e}");
@@ -166,7 +198,11 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut stream: tokio::net::UnixStream, page: Arc<Page>) {
+async fn handle_connection(
+    mut stream: tokio::net::UnixStream,
+    page: Arc<Page>,
+    logs: Arc<DaemonLogs>,
+) {
     let raw = match ipc::read_message(&mut stream).await {
         Ok(data) if data.is_empty() => return,
         Ok(data) => data,
@@ -191,7 +227,7 @@ async fn handle_connection(mut stream: tokio::net::UnixStream, page: Arc<Page>) 
         request.method, request.id
     );
 
-    let response = dispatch(&request, &page).await;
+    let response = dispatch(&request, &page, &logs).await;
 
     let payload = serde_json::to_vec(&response).unwrap();
     if let Err(e) = ipc::write_message(&mut stream, &payload).await {
@@ -199,7 +235,7 @@ async fn handle_connection(mut stream: tokio::net::UnixStream, page: Arc<Page>) 
     }
 }
 
-async fn dispatch(req: &DaemonRequest, page: &Page) -> DaemonResponse {
+async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
         "health" => DaemonResponse::success(
@@ -227,6 +263,22 @@ async fn dispatch(req: &DaemonRequest, page: &Page) -> DaemonResponse {
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "reload" => match handlers::navigate::handle_reload(page).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "console" => match handlers::inspect::handle_console(logs, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "network" => match handlers::inspect::handle_network(logs, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "dialog" => match handlers::inspect::handle_dialog(logs, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "eval" => match handlers::inspect::handle_eval(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },

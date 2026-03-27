@@ -130,6 +130,107 @@ pub fn format_text_reload(result: &Value) -> String {
     format!("Reloaded: {url}\nTitle: {title}\n\nPage summary:\n{summary}")
 }
 
+/// Format console log entries in text mode.
+pub fn format_text_console(result: &Value) -> String {
+    let entries = result.get("entries").and_then(|v| v.as_array());
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    match entries {
+        Some(entries) if !entries.is_empty() => {
+            let lines: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let ts = e.get("timestamp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                    let log_type = e.get("logType").and_then(|v| v.as_str()).unwrap_or("log");
+                    let text = e.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    if url.is_empty() {
+                        format!("[{ts:.0}] [{log_type}] {text}")
+                    } else {
+                        format!("[{ts:.0}] [{log_type}] {text} ({url})")
+                    }
+                })
+                .collect();
+            format!("{}\n\n{count} entries", lines.join("\n"))
+        }
+        _ => format!("No console entries ({count} total)"),
+    }
+}
+
+/// Format network log entries in text mode.
+pub fn format_text_network(result: &Value) -> String {
+    let entries = result.get("entries").and_then(|v| v.as_array());
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    match entries {
+        Some(entries) if !entries.is_empty() => {
+            let lines: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let status = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let method = e.get("method").and_then(|v| v.as_str()).unwrap_or("???");
+                    let url = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let rtype = e
+                        .get("resourceType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let failed = e.get("failed").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let failure = e
+                        .get("failureText")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+
+                    if failed && !failure.is_empty() {
+                        format!("[FAILED] {method} {url} ({rtype}) — {failure}")
+                    } else {
+                        format!("[{status}] {method} {url} ({rtype})")
+                    }
+                })
+                .collect();
+            format!("{}\n\n{count} entries", lines.join("\n"))
+        }
+        _ => format!("No network entries ({count} total)"),
+    }
+}
+
+/// Format dialog entries in text mode.
+pub fn format_text_dialog(result: &Value) -> String {
+    let entries = result.get("entries").and_then(|v| v.as_array());
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    match entries {
+        Some(entries) if !entries.is_empty() => {
+            let lines: Vec<String> = entries
+                .iter()
+                .map(|e| {
+                    let dtype = e
+                        .get("dialogType")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    let message = e.get("message").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    if url.is_empty() {
+                        format!("[{dtype}] {message}")
+                    } else {
+                        format!("[{dtype}] {message} ({url})")
+                    }
+                })
+                .collect();
+            format!("{}\n\n{count} entries", lines.join("\n"))
+        }
+        _ => format!("No dialog entries ({count} total)"),
+    }
+}
+
+/// Format eval result in text mode.
+pub fn format_text_eval(result: &Value) -> String {
+    result
+        .get("result")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string()
+}
+
 /// Format any result as pretty-printed JSON.
 pub fn format_json(result: &Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string())
