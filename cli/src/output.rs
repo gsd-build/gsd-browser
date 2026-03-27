@@ -376,6 +376,32 @@ pub fn format_text_viewport(result: &Value) -> String {
     format!("Viewport: {width}x{height} ({preset})")
 }
 
+/// Format screenshot command output in text mode (metadata only, no base64 dump).
+pub fn format_text_screenshot(result: &Value) -> String {
+    let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+    let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let mime = result
+        .get("mimeType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("image/jpeg");
+    let scope = result
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or("viewport");
+    let byte_len = result
+        .get("byteLength")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut out = format!("Screenshot: {width}x{height} {mime} ({scope})");
+    if byte_len > 0 {
+        let kb = byte_len as f64 / 1024.0;
+        out.push_str(&format!(" — {kb:.1} KB"));
+    }
+    out.push_str("\nUse --json to get base64 data, or --output <path> to save to file");
+    out
+}
+
 /// Format any result as pretty-printed JSON.
 pub fn format_json(result: &Value) -> String {
     serde_json::to_string_pretty(result).unwrap_or_else(|_| "{}".to_string())

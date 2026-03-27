@@ -109,6 +109,7 @@ dependencies = [
 name = "browser-tools"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "browser-tools-common",
  "clap",
  "libc",
@@ -135,6 +136,7 @@ dependencies = [
 name = "browser-tools-daemon"
 version = "0.1.0"
 dependencies = [
+ "base64",
  "browser-tools-common",
  "chromiumoxide",
  "futures",
