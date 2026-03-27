@@ -1,6 +1,7 @@
 mod daemon_client;
 mod output;
 
+use browser_tools_common::config::Config;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -574,7 +575,16 @@ enum DaemonCmd {
 
 #[tokio::main]
 async fn main() {
-    let cli = Cli::parse();
+    let mut cli = Cli::parse();
+
+    // Load config (layers 1-4: defaults → user → project → env vars)
+    let config = Config::load();
+
+    // Layer 5: CLI flags override config.
+    // If no --browser-path CLI flag was provided, use config value as fallback.
+    if cli.browser_path.is_none() {
+        cli.browser_path = config.browser.path.clone();
+    }
 
     let result = match &cli.command {
         Commands::Daemon { cmd } => match cmd {
