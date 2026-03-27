@@ -361,6 +361,14 @@ enum Commands {
         #[arg(long)]
         scope: Option<String>,
     },
+    /// Get a diagnostic summary of the current browser session
+    SessionSummary,
+    /// Capture a debug bundle (screenshot, logs, timeline, accessibility tree)
+    DebugBundle {
+        /// Optional name suffix for the bundle directory
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -500,6 +508,8 @@ async fn main() {
             cmd_find_best(&cli, intent, scope.as_deref()).await
         }
         Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
+        Commands::SessionSummary => cmd_session_summary(&cli).await,
+        Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
     };
 
     if let Err(e) = result {
@@ -1123,6 +1133,30 @@ async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     let resp =
         daemon_client::send_request("act", params, cli.browser_path.as_deref()).await?;
     handle_response(cli, resp, output::format_text_act)
+}
+
+async fn cmd_session_summary(cli: &Cli) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "session_summary",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_session_summary)
+}
+
+async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(n) = name {
+        params["name"] = serde_json::json!(n);
+    }
+    let resp = daemon_client::send_request(
+        "debug_bundle",
+        params,
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_debug_bundle)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.

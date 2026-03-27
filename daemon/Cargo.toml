@@ -6,7 +6,9 @@ edition = "2021"
 [dependencies]
 base64 = "0.22"
 browser-tools-common = { path = "../common" }
+chrono = { workspace = true }
 chromiumoxide = { workspace = true }
+dirs = { workspace = true }
 futures = { workspace = true }
 nix = { workspace = true }
 serde = { workspace = true }

@@ -568,6 +568,14 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
                 json!({"retryHint": "Check intent is valid and matching elements exist on page"}),
             ),
         },
+        "session_summary" => match handlers::session::handle_session_summary(logs, state) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "debug_bundle" => match handlers::session::handle_debug_bundle(page, logs, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
