@@ -606,6 +606,141 @@ pub fn format_text_timeline(result: &Value) -> String {
     }
 }
 
+/// Format snapshot result in text mode — version, count, per-ref summary.
+pub fn format_text_snapshot(result: &Value) -> String {
+    let version = result.get("version").and_then(|v| v.as_u64()).unwrap_or(0);
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let mut lines = vec![format!("Snapshot v{version}: {count} elements")];
+
+    if let Some(refs) = result.get("refs").and_then(|v| v.as_object()) {
+        // Sort keys numerically (e1, e2, ...)
+        let mut keys: Vec<&String> = refs.keys().collect();
+        keys.sort_by(|a, b| {
+            let a_num: u64 = a.trim_start_matches('e').parse().unwrap_or(0);
+            let b_num: u64 = b.trim_start_matches('e').parse().unwrap_or(0);
+            a_num.cmp(&b_num)
+        });
+
+        for key in keys {
+            if let Some(node) = refs.get(key) {
+                let tag = node.get("tag").and_then(|v| v.as_str()).unwrap_or("?");
+                let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
+                let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                let visible = node.get("visible").and_then(|v| v.as_bool()).unwrap_or(false);
+
+                let role_display = if role.is_empty() {
+                    tag.to_string()
+                } else {
+                    format!("{tag}[{role}]")
+                };
+
+                let vis = if !visible { " [hidden]" } else { "" };
+                let name_display = if name.is_empty() {
+                    String::new()
+                } else {
+                    let truncated = if name.len() > 40 {
+                        format!("{}…", &name[..39])
+                    } else {
+                        name.to_string()
+                    };
+                    format!(" \"{truncated}\"")
+                };
+
+                lines.push(format!(
+                    "  @v{version}:{key} {role_display}{name_display}{vis}"
+                ));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format get-ref result in text mode — ref metadata.
+pub fn format_text_get_ref(result: &Value) -> String {
+    let ref_str = result.get("ref").and_then(|v| v.as_str()).unwrap_or("?");
+    let tag = result.get("tag").and_then(|v| v.as_str()).unwrap_or("?");
+    let role = result.get("role").and_then(|v| v.as_str()).unwrap_or("");
+    let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("");
+    let visible = result.get("visible").and_then(|v| v.as_bool()).unwrap_or(false);
+    let enabled = result.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    let mut lines = vec![format!("Ref: {ref_str}")];
+    lines.push(format!("Tag: {tag}"));
+    if !role.is_empty() {
+        lines.push(format!("Role: {role}"));
+    }
+    if !name.is_empty() {
+        lines.push(format!("Name: {name}"));
+    }
+    lines.push(format!("Visible: {visible}"));
+    lines.push(format!("Enabled: {enabled}"));
+
+    // Show full node details if present
+    if let Some(node) = result.get("node") {
+        if let Some(hints) = node.get("selectorHints").and_then(|v| v.as_array()) {
+            let hint_strs: Vec<&str> = hints.iter().filter_map(|v| v.as_str()).collect();
+            if !hint_strs.is_empty() {
+                lines.push(format!("Hints: {}", hint_strs.join(", ")));
+            }
+        }
+        if let Some(heading) = node.get("nearestHeading").and_then(|v| v.as_str()) {
+            if !heading.is_empty() {
+                lines.push(format!("Nearest heading: {heading}"));
+            }
+        }
+        if let Some(form) = node.get("formOwnership").and_then(|v| v.as_str()) {
+            if !form.is_empty() {
+                lines.push(format!("Form: {form}"));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format ref action result (click-ref, hover-ref, fill-ref) in text mode.
+/// Shows ref resolution info plus the underlying interaction result.
+pub fn format_text_ref_action(result: &Value) -> String {
+    let mut lines = Vec::new();
+
+    // Show ref resolution info
+    if let Some(res) = result.get("ref_resolution") {
+        let ref_str = res.get("ref").and_then(|v| v.as_str()).unwrap_or("?");
+        let selector = res
+            .get("resolved_selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let tier = res.get("tier").and_then(|v| v.as_u64()).unwrap_or(0);
+        let tag = res.get("tag").and_then(|v| v.as_str()).unwrap_or("");
+        let name = res.get("name").and_then(|v| v.as_str()).unwrap_or("");
+
+        let tier_label = match tier {
+            1 => "domPath",
+            2 => "selectorHint",
+            3 => "role+name",
+            4 => "fingerprint",
+            _ => "unknown",
+        };
+
+        lines.push(format!(
+            "Ref: {ref_str} → {selector} (tier {tier}: {tier_label})"
+        ));
+        if !tag.is_empty() || !name.is_empty() {
+            lines.push(format!("Element: <{tag}> \"{name}\""));
+        }
+    }
+
+    // Delegate to interaction formatter for the rest
+    let interaction_text = format_text_interaction(result);
+    if !interaction_text.is_empty() {
+        lines.push(interaction_text);
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
