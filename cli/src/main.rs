@@ -223,6 +223,56 @@ enum Commands {
         #[arg(long)]
         write_to_disk: bool,
     },
+    /// Take a snapshot of interactive elements and assign versioned refs
+    Snapshot {
+        /// CSS selector to scope the snapshot
+        #[arg(long)]
+        selector: Option<String>,
+        /// Only include interactive elements (default: true)
+        #[arg(long, default_value = "true")]
+        interactive_only: bool,
+        /// Maximum number of elements (default: 40)
+        #[arg(long, default_value = "40")]
+        limit: u32,
+        /// Semantic mode: interactive, form, dialog, navigation, errors, headings, visible_only
+        #[arg(long)]
+        mode: Option<String>,
+    },
+    /// Get metadata for a specific element ref (e.g. @v1:e1)
+    GetRef {
+        /// Ref string in @vN:eM format
+        #[arg(name = "ref")]
+        ref_str: String,
+    },
+    /// Click an element by its snapshot ref
+    ClickRef {
+        /// Ref string in @vN:eM format
+        #[arg(name = "ref")]
+        ref_str: String,
+    },
+    /// Hover over an element by its snapshot ref
+    HoverRef {
+        /// Ref string in @vN:eM format
+        #[arg(name = "ref")]
+        ref_str: String,
+    },
+    /// Type text into an element by its snapshot ref
+    FillRef {
+        /// Ref string in @vN:eM format
+        #[arg(name = "ref")]
+        ref_str: String,
+        /// Text to type
+        text: String,
+        /// Clear the field before typing
+        #[arg(long)]
+        clear_first: bool,
+        /// Press Enter after typing
+        #[arg(long)]
+        submit: bool,
+        /// Type character-by-character
+        #[arg(long)]
+        slowly: bool,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -318,6 +368,22 @@ async fn main() {
             timeout,
         } => cmd_wait_for(&cli, condition, value.as_deref(), threshold.as_deref(), *timeout).await,
         Commands::Timeline { write_to_disk } => cmd_timeline(&cli, *write_to_disk).await,
+        Commands::Snapshot {
+            selector,
+            interactive_only,
+            limit,
+            mode,
+        } => cmd_snapshot(&cli, selector.as_deref(), *interactive_only, *limit, mode.as_deref()).await,
+        Commands::GetRef { ref_str } => cmd_get_ref(&cli, ref_str).await,
+        Commands::ClickRef { ref_str } => cmd_click_ref(&cli, ref_str).await,
+        Commands::HoverRef { ref_str } => cmd_hover_ref(&cli, ref_str).await,
+        Commands::FillRef {
+            ref_str,
+            text,
+            clear_first,
+            submit,
+            slowly,
+        } => cmd_fill_ref(&cli, ref_str, text, *clear_first, *submit, *slowly).await,
     };
 
     if let Err(e) = result {
@@ -726,6 +792,81 @@ async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, output::format_text_timeline)
+}
+
+async fn cmd_snapshot(
+    cli: &Cli,
+    selector: Option<&str>,
+    interactive_only: bool,
+    limit: u32,
+    mode: Option<&str>,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "interactive_only": interactive_only,
+        "limit": limit,
+    });
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    if let Some(m) = mode {
+        params["mode"] = serde_json::json!(m);
+    }
+    let resp =
+        daemon_client::send_request("snapshot", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_snapshot)
+}
+
+async fn cmd_get_ref(cli: &Cli, ref_str: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "get_ref",
+        serde_json::json!({"ref": ref_str}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_get_ref)
+}
+
+async fn cmd_click_ref(cli: &Cli, ref_str: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "click_ref",
+        serde_json::json!({"ref": ref_str}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_ref_action)
+}
+
+async fn cmd_hover_ref(cli: &Cli, ref_str: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "hover_ref",
+        serde_json::json!({"ref": ref_str}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_ref_action)
+}
+
+async fn cmd_fill_ref(
+    cli: &Cli,
+    ref_str: &str,
+    text: &str,
+    clear_first: bool,
+    submit: bool,
+    slowly: bool,
+) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "fill_ref",
+        serde_json::json!({
+            "ref": ref_str,
+            "text": text,
+            "clear_first": clear_first,
+            "submit": submit,
+            "slowly": slowly,
+        }),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_ref_action)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.

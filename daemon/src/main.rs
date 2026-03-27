@@ -381,6 +381,41 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "snapshot" => match handlers::refs::handle_snapshot(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "get_ref" => match handlers::refs::handle_get_ref(state, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "click_ref" => match handlers::refs::handle_click_ref(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check ref is valid and element still exists on page"}),
+            ),
+        },
+        "hover_ref" => match handlers::refs::handle_hover_ref(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check ref is valid and element still exists on page"}),
+            ),
+        },
+        "fill_ref" => match handlers::refs::handle_fill_ref(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check ref targets an input/textarea element"}),
+            ),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
