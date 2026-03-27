@@ -35,6 +35,33 @@ enum Commands {
     Forward,
     /// Reload the current page
     Reload,
+    /// Get console log entries
+    Console {
+        /// Don't clear the buffer after reading
+        #[arg(long)]
+        no_clear: bool,
+    },
+    /// Get network log entries
+    Network {
+        /// Don't clear the buffer after reading
+        #[arg(long)]
+        no_clear: bool,
+
+        /// Filter: all, errors, or fetch-xhr
+        #[arg(long, default_value = "all")]
+        filter: String,
+    },
+    /// Get dialog event entries
+    Dialog {
+        /// Don't clear the buffer after reading
+        #[arg(long)]
+        no_clear: bool,
+    },
+    /// Evaluate a JavaScript expression
+    Eval {
+        /// JavaScript expression to evaluate
+        expression: String,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -66,6 +93,10 @@ async fn main() {
         Commands::Back => cmd_back(&cli).await,
         Commands::Forward => cmd_forward(&cli).await,
         Commands::Reload => cmd_reload(&cli).await,
+        Commands::Console { no_clear } => cmd_console(&cli, *no_clear).await,
+        Commands::Network { no_clear, filter } => cmd_network(&cli, *no_clear, filter).await,
+        Commands::Dialog { no_clear } => cmd_dialog(&cli, *no_clear).await,
+        Commands::Eval { expression } => cmd_eval(&cli, expression).await,
     };
 
     if let Err(e) = result {
@@ -165,6 +196,46 @@ async fn cmd_reload(cli: &Cli) -> CmdResult {
         daemon_client::send_request("reload", serde_json::json!({}), cli.browser_path.as_deref())
             .await?;
     handle_response(cli, resp, output::format_text_reload)
+}
+
+async fn cmd_console(cli: &Cli, no_clear: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "console",
+        serde_json::json!({"clear": !no_clear}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_console)
+}
+
+async fn cmd_network(cli: &Cli, no_clear: bool, filter: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "network",
+        serde_json::json!({"clear": !no_clear, "filter": filter}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_network)
+}
+
+async fn cmd_dialog(cli: &Cli, no_clear: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "dialog",
+        serde_json::json!({"clear": !no_clear}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_dialog)
+}
+
+async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "eval",
+        serde_json::json!({"expression": expression}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_eval)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
