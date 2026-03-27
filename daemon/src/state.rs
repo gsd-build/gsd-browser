@@ -153,6 +153,52 @@ impl PageRegistry {
     }
 }
 
+// ── Action Cache Types ──
+
+/// A cached selector resolution for a given page structure + intent.
+#[derive(Debug, Clone)]
+pub struct CachedAction {
+    pub selector: String,
+    pub score: f64,
+    pub cached_at: f64,
+}
+
+/// In-memory cache mapping `url_hash:intent` → resolved selector.
+pub struct ActionCache {
+    pub entries: HashMap<String, CachedAction>,
+    pub hits: u64,
+    pub misses: u64,
+}
+
+impl ActionCache {
+    pub fn new() -> Self {
+        Self {
+            entries: HashMap::new(),
+            hits: 0,
+            misses: 0,
+        }
+    }
+}
+
+// ── Trace State ──
+
+/// Tracks whether a CDP trace is currently active.
+pub struct TraceState {
+    pub active: bool,
+    pub name: Option<String>,
+    pub started_at: f64,
+}
+
+impl TraceState {
+    pub fn new() -> Self {
+        Self {
+            active: false,
+            name: None,
+            started_at: 0.0,
+        }
+    }
+}
+
 /// Top-level daemon state shared across all connections.
 pub struct DaemonState {
     pub timeline: Mutex<ActionTimeline>,
@@ -161,6 +207,8 @@ pub struct DaemonState {
     pub pages: Mutex<PageRegistry>,
     pub selected_frame: Mutex<Option<String>>,
     pub mock_routes: Mutex<MockRouteStore>,
+    pub action_cache: Mutex<ActionCache>,
+    pub trace_state: Mutex<TraceState>,
 }
 
 impl DaemonState {
@@ -172,6 +220,8 @@ impl DaemonState {
             pages: Mutex::new(PageRegistry::new()),
             selected_frame: Mutex::new(None),
             mock_routes: Mutex::new(MockRouteStore::new()),
+            action_cache: Mutex::new(ActionCache::new()),
+            trace_state: Mutex::new(TraceState::new()),
         }
     }
 }

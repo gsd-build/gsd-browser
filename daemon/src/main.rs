@@ -638,6 +638,30 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "action_cache" => match handlers::advanced::handle_action_cache(state, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "check_injection" => match handlers::advanced::handle_check_injection(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "generate_test" => match handlers::codegen::handle_generate_test(state, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "har_export" => match handlers::har::handle_har_export(logs, &req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "trace_start" => match handlers::traces::handle_trace_start(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "trace_stop" => match handlers::traces::handle_trace_stop(page, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,

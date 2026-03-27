@@ -1677,6 +1677,102 @@ pub fn format_text_vault_list(result: &Value) -> String {
     }
 }
 
+pub fn format_text_action_cache(result: &Value) -> String {
+    // Stats response
+    if let Some(entries) = result.get("entries").and_then(|v| v.as_u64()) {
+        if result.get("hits").is_some() {
+            let hits = result.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+            let misses = result.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
+            let hit_rate = result.get("hitRate").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            return format!(
+                "Action cache: {entries} entries, {hits} hits, {misses} misses ({:.0}% hit rate)",
+                hit_rate * 100.0
+            );
+        }
+    }
+    // Get response
+    if let Some(found) = result.get("found").and_then(|v| v.as_bool()) {
+        if found {
+            let selector = result.get("selector").and_then(|v| v.as_str()).unwrap_or("?");
+            let score = result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            return format!("Cache hit: {selector} (score: {score:.2})");
+        } else {
+            return "Cache miss".to_string();
+        }
+    }
+    // Put response
+    if result.get("stored").and_then(|v| v.as_bool()).unwrap_or(false) {
+        let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("?");
+        let selector = result.get("selector").and_then(|v| v.as_str()).unwrap_or("?");
+        return format!("Cached: {intent} → {selector}");
+    }
+    // Clear response
+    if let Some(cleared) = result.get("cleared").and_then(|v| v.as_u64()) {
+        return format!("Action cache cleared ({cleared} entries removed)");
+    }
+    format!("{}", serde_json::to_string_pretty(result).unwrap_or_default())
+}
+
+pub fn format_text_check_injection(result: &Value) -> String {
+    let clean = result.get("clean").and_then(|v| v.as_bool()).unwrap_or(true);
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    if clean {
+        return "✅ No prompt injection patterns detected".to_string();
+    }
+
+    let mut lines = vec![format!("⚠️  {count} potential injection pattern(s) found:")];
+    if let Some(findings) = result.get("findings").and_then(|v| v.as_array()) {
+        for f in findings {
+            let severity = f.get("severity").and_then(|v| v.as_str()).unwrap_or("?");
+            let desc = f.get("description").and_then(|v| v.as_str()).unwrap_or("?");
+            let source = f.get("source").and_then(|v| v.as_str()).unwrap_or("?");
+            let fc = f.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+            let icon = match severity {
+                "high" => "🔴",
+                "medium" => "🟡",
+                _ => "🟢",
+            };
+            lines.push(format!("  {icon} [{severity}] {desc} ({fc}x, {source})"));
+        }
+    }
+    lines.join("\n")
+}
+
+pub fn format_text_generate_test(result: &Value) -> String {
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+    let actions = result.get("actions").and_then(|v| v.as_u64()).unwrap_or(0);
+    let lines = result.get("lines").and_then(|v| v.as_u64()).unwrap_or(0);
+    format!("Test generated: {path}\n  {actions} actions → {lines} lines")
+}
+
+pub fn format_text_har_export(result: &Value) -> String {
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+    let entries = result.get("entries").and_then(|v| v.as_u64()).unwrap_or(0);
+    let size = result.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+    let size_kb = size as f64 / 1024.0;
+    format!("HAR exported: {path}\n  {entries} entries, {size_kb:.1} KB")
+}
+
+pub fn format_text_trace_start(result: &Value) -> String {
+    let name = result
+        .get("name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("(unnamed)");
+    format!("Trace started: {name}")
+}
+
+pub fn format_text_trace_stop(result: &Value) -> String {
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+    let events = result.get("events").and_then(|v| v.as_u64()).unwrap_or(0);
+    let duration = result.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let size = result.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+    let size_kb = size as f64 / 1024.0;
+    format!(
+        "Trace stopped: {path}\n  {events} events, {duration:.1}s, {size_kb:.1} KB"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
