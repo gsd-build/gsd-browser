@@ -1,4 +1,5 @@
 mod capture;
+mod handlers;
 mod helpers;
 mod settle;
 
@@ -7,10 +8,12 @@ use browser_tools_common::{
     ERR_METHOD_NOT_FOUND,
 };
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::Page;
 use futures::StreamExt;
 use serde_json::json;
 use std::fs;
 use std::process;
+use std::sync::Arc;
 use tokio::net::UnixListener;
 use tracing::{error, info, warn};
 
@@ -116,6 +119,9 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     settle::ensure_mutation_counter(&page).await;
     info!("[browser-tools-daemon] browser helpers injected, mutation counter installed");
 
+    // Wrap page in Arc for sharing across connection tasks
+    let page = Arc::new(page);
+
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
     info!(
@@ -133,7 +139,8 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                 match accept_result {
                     Ok((stream, _addr)) => {
                         info!("[browser-tools-daemon] connection accepted");
-                        tokio::spawn(handle_connection(stream));
+                        let page = Arc::clone(&page);
+                        tokio::spawn(handle_connection(stream, page));
                     }
                     Err(e) => {
                         error!("[browser-tools-daemon] accept error: {e}");
@@ -159,7 +166,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-async fn handle_connection(mut stream: tokio::net::UnixStream) {
+async fn handle_connection(mut stream: tokio::net::UnixStream, page: Arc<Page>) {
     let raw = match ipc::read_message(&mut stream).await {
         Ok(data) if data.is_empty() => return,
         Ok(data) => data,
@@ -184,7 +191,7 @@ async fn handle_connection(mut stream: tokio::net::UnixStream) {
         request.method, request.id
     );
 
-    let response = dispatch(&request).await;
+    let response = dispatch(&request, &page).await;
 
     let payload = serde_json::to_vec(&response).unwrap();
     if let Err(e) = ipc::write_message(&mut stream, &payload).await {
@@ -192,7 +199,7 @@ async fn handle_connection(mut stream: tokio::net::UnixStream) {
     }
 }
 
-async fn dispatch(req: &DaemonRequest) -> DaemonResponse {
+async fn dispatch(req: &DaemonRequest, page: &Page) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
         "health" => DaemonResponse::success(
@@ -202,6 +209,27 @@ async fn dispatch(req: &DaemonRequest) -> DaemonResponse {
                 "pid": process::id(),
             }),
         ),
+        "navigate" => match handlers::navigate::handle_navigate(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check URL is valid and reachable"}),
+            ),
+        },
+        "back" => match handlers::navigate::handle_back(page).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "forward" => match handlers::navigate::handle_forward(page).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "reload" => match handlers::navigate::handle_reload(page).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
