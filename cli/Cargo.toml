@@ -2,6 +2,13 @@
 name = "browser-tools"
 version = "0.1.0"
 edition = "2021"
+description = "Browser automation CLI powered by Chrome DevTools Protocol"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/anthropics/browser-tools"
+homepage = "https://github.com/anthropics/browser-tools"
+keywords = ["browser", "automation", "cdp", "chrome", "testing"]
+categories = ["command-line-utilities", "development-tools::testing", "web-programming"]
+readme = "../README.md"
 
 [[bin]]
 name = "browser-tools"

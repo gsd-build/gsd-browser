@@ -1,0 +1,52 @@
+{
+  "name": "@gsd-build/browser-tools",
+  "version": "0.1.0",
+  "description": "Browser automation CLI powered by Chrome DevTools Protocol — 63 commands for navigation, interaction, screenshots, accessibility, network mocking, visual diffing, and more.",
+  "license": "MIT OR Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/anthropics/browser-tools.git"
+  },
+  "homepage": "https://github.com/anthropics/browser-tools",
+  "bugs": {
+    "url": "https://github.com/anthropics/browser-tools/issues"
+  },
+  "keywords": [
+    "browser",
+    "automation",
+    "cdp",
+    "chrome",
+    "devtools",
+    "testing",
+    "accessibility",
+    "screenshot",
+    "cli"
+  ],
+  "bin": {
+    "browser-tools": "./bin/browser-tools"
+  },
+  "scripts": {
+    "postinstall": "node scripts/postinstall.js"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "arm64",
+    "x64"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "README.md",
+    "LICENSE-MIT",
+    "LICENSE-APACHE",
+    "SKILL.md",
+    "AGENTS.md"
+  ]
+}
