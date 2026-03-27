@@ -263,6 +263,7 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
             | "hover" | "scroll" | "select_option" | "set_checked" | "drag"
             | "snapshot" | "click_ref" | "hover_ref" | "fill_ref"
             | "assert" | "diff" | "wait_for" | "batch"
+            | "fill_form" | "act"
     );
 
     // Params summary for timeline (truncated to 80 chars)
@@ -294,6 +295,7 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
         req.method.as_str(),
         "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
             | "hover" | "click_ref" | "hover_ref" | "fill_ref"
+            | "fill_form" | "act"
     ) {
         let before_state = crate::capture::capture_compact_page_state(page, false).await;
         let mut diff = state.diff.lock().unwrap();
@@ -322,6 +324,7 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
         req.method.as_str(),
         "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
             | "hover" | "click_ref" | "hover_ref" | "fill_ref"
+            | "fill_form" | "act"
     ) {
         let after_state = crate::capture::capture_compact_page_state(page, false).await;
         let mut diff = state.diff.lock().unwrap();
@@ -538,6 +541,32 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
         "select_frame" => match handlers::pages::handle_select_frame(state, &req.params) {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "analyze_form" => match handlers::forms::handle_analyze_form(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "fill_form" => match handlers::forms::handle_fill_form(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check field identifiers match form labels/names/placeholders"}),
+            ),
+        },
+        "find_best" => match handlers::intent::handle_find_best(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "act" => match handlers::intent::handle_act(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check intent is valid and matching elements exist on page"}),
+            ),
         },
         _ => DaemonResponse::error(
             req.id,
