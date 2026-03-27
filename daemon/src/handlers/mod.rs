@@ -1,6 +1,8 @@
 pub mod assert_cmd;
 pub mod batch;
+pub mod forms;
 pub mod inspect;
+pub mod intent;
 pub mod interaction;
 pub mod navigate;
 pub mod pages;

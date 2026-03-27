@@ -1006,6 +1006,272 @@ pub fn format_text_select_frame(result: &Value) -> String {
     }
 }
 
+/// Format analyze-form result — list fields with labels, types, and submit buttons.
+pub fn format_text_analyze_form(result: &Value) -> String {
+    let form_sel = result
+        .get("formSelector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let field_count = result
+        .get("fieldCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut lines = vec![format!("Form: {form_sel} ({field_count} fields)")];
+
+    if let Some(fields) = result.get("fields").and_then(|v| v.as_array()) {
+        for f in fields {
+            let label = f.get("label").and_then(|v| v.as_str()).unwrap_or("");
+            let ftype = f.get("type").and_then(|v| v.as_str()).unwrap_or("text");
+            let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("");
+            let required = f.get("required").and_then(|v| v.as_bool()).unwrap_or(false);
+            let hidden = f.get("hidden").and_then(|v| v.as_bool()).unwrap_or(false);
+            let disabled = f.get("disabled").and_then(|v| v.as_bool()).unwrap_or(false);
+            let value = f.get("value").and_then(|v| v.as_str()).unwrap_or("");
+
+            let mut flags = Vec::new();
+            if required {
+                flags.push("required");
+            }
+            if hidden {
+                flags.push("hidden");
+            }
+            if disabled {
+                flags.push("disabled");
+            }
+            let flag_str = if flags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", flags.join(", "))
+            };
+            let name_str = if name.is_empty() {
+                String::new()
+            } else {
+                format!(" name=\"{name}\"")
+            };
+            let val_str = if value.is_empty() {
+                String::new()
+            } else {
+                format!(" value=\"{value}\"")
+            };
+            let label_display = if label.is_empty() {
+                "(no label)".to_string()
+            } else {
+                format!("\"{label}\"")
+            };
+
+            lines.push(format!(
+                "  {label_display} [{ftype}]{name_str}{val_str}{flag_str}"
+            ));
+
+            // Show select options
+            if let Some(opts) = f.get("options").and_then(|v| v.as_array()) {
+                let opt_strs: Vec<String> = opts
+                    .iter()
+                    .take(5)
+                    .map(|o| {
+                        let olabel = o.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                        let selected = o.get("selected").and_then(|v| v.as_bool()).unwrap_or(false);
+                        if selected {
+                            format!("*{olabel}")
+                        } else {
+                            olabel.to_string()
+                        }
+                    })
+                    .collect();
+                let more = if opts.len() > 5 {
+                    format!(" +{} more", opts.len() - 5)
+                } else {
+                    String::new()
+                };
+                lines.push(format!("    options: {}{more}", opt_strs.join(", ")));
+            }
+
+            // Show checked state for checkbox/radio
+            if let Some(checked) = f.get("checked").and_then(|v| v.as_bool()) {
+                lines.push(format!("    checked: {checked}"));
+            }
+        }
+    }
+
+    if let Some(buttons) = result.get("submitButtons").and_then(|v| v.as_array()) {
+        if !buttons.is_empty() {
+            lines.push("Submit buttons:".to_string());
+            for b in buttons {
+                let text = b.get("text").and_then(|v| v.as_str()).unwrap_or("");
+                let btype = b.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                let sel = b.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+                lines.push(format!("  \"{text}\" [{btype}] → {sel}"));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format fill-form result — show filled fields, errors, and submission status.
+pub fn format_text_fill_form(result: &Value) -> String {
+    let filled = result
+        .get("filled")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let errors = result.get("errors").and_then(|v| v.as_array());
+    let unresolved = result.get("unresolved").and_then(|v| v.as_array());
+    let submitted = result
+        .get("submitted")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let mut lines = vec![format!("Filled {filled} field(s)")];
+
+    if let Some(filled_fields) = result.get("filled").and_then(|v| v.as_array()) {
+        for f in filled_fields {
+            if let Some(name) = f.as_str() {
+                lines.push(format!("  ✓ {name}"));
+            }
+        }
+    }
+
+    if let Some(errs) = errors {
+        if !errs.is_empty() {
+            lines.push("Fill errors:".to_string());
+            for e in errs {
+                if let Some(msg) = e.as_str() {
+                    lines.push(format!("  ✗ {msg}"));
+                }
+            }
+        }
+    }
+
+    if let Some(unres) = unresolved {
+        if !unres.is_empty() {
+            let names: Vec<&str> = unres.iter().filter_map(|v| v.as_str()).collect();
+            lines.push(format!("Unresolved fields: {}", names.join(", ")));
+        }
+    }
+
+    if submitted {
+        lines.push("Form submitted".to_string());
+    }
+
+    // Append compact page state summary if available
+    if let Some(state) = result.get("state") {
+        lines.push(String::new());
+        lines.push("Page summary:".to_string());
+        lines.push(format_compact_summary(state));
+    }
+
+    lines.join("\n")
+}
+
+/// Format find-best result — show scored candidates for an intent.
+pub fn format_text_find_best(result: &Value) -> String {
+    let intent = result
+        .get("intent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let count = result
+        .get("candidateCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let scope = result
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .unwrap_or("document");
+
+    let mut lines = vec![format!(
+        "Intent: {intent} — {count} candidate(s) (scope: {scope})"
+    )];
+
+    if let Some(candidates) = result.get("candidates").and_then(|v| v.as_array()) {
+        for (i, c) in candidates.iter().enumerate() {
+            let score = c.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let selector = c.get("selector").and_then(|v| v.as_str()).unwrap_or("?");
+            let tag = c.get("tag").and_then(|v| v.as_str()).unwrap_or("");
+            let text = c
+                .get("text")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .chars()
+                .take(50)
+                .collect::<String>();
+            let reason = c.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+
+            let text_display = if text.is_empty() {
+                String::new()
+            } else {
+                format!(" \"{text}\"")
+            };
+            lines.push(format!(
+                "  {}. [{score:.3}] <{tag}>{text_display} → {selector}",
+                i + 1
+            ));
+            if !reason.is_empty() {
+                lines.push(format!("     reason: {reason}"));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
+/// Format act result — show the action performed on the top intent candidate.
+pub fn format_text_act(result: &Value) -> String {
+    let intent = result
+        .get("intent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let action = result
+        .get("action")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let score = result
+        .get("score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let mut lines = vec![format!(
+        "Act: {action} for intent '{intent}' (score: {score:.3})"
+    )];
+
+    if let Some(candidate) = result.get("candidate") {
+        let selector = candidate
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let tag = candidate
+            .get("tag")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let text = candidate
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let reason = candidate
+            .get("reason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        lines.push(format!("  Element: <{tag}> → {selector}"));
+        if !text.is_empty() {
+            lines.push(format!("  Text: \"{text}\""));
+        }
+        if !reason.is_empty() {
+            lines.push(format!("  Reason: {reason}"));
+        }
+    }
+
+    // Append compact page state summary if available
+    if let Some(state) = result.get("state") {
+        lines.push(String::new());
+        lines.push("Page summary:".to_string());
+        lines.push(format_compact_summary(state));
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

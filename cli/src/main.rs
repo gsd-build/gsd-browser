@@ -323,6 +323,44 @@ enum Commands {
         #[arg(long)]
         url_pattern: Option<String>,
     },
+    /// Analyze form fields, labels, and submit buttons
+    AnalyzeForm {
+        /// CSS selector to scope to a specific form
+        #[arg(long)]
+        selector: Option<String>,
+    },
+    /// Fill multiple form fields by identifier (label, name, placeholder, or aria-label)
+    FillForm {
+        /// JSON object mapping field identifiers to values, e.g. '{"Email": "a@b.com", "Password": "secret"}'
+        #[arg(long)]
+        values: String,
+        /// CSS selector to scope to a specific form
+        #[arg(long)]
+        selector: Option<String>,
+        /// Click the submit button after filling
+        #[arg(long)]
+        submit: bool,
+    },
+    /// Find the best-matching element for a semantic intent
+    FindBest {
+        /// Semantic intent: submit_form, close_dialog, primary_cta, search_field,
+        /// next_step, dismiss, auth_action, back_navigation
+        #[arg(long)]
+        intent: String,
+        /// CSS selector to narrow the search area
+        #[arg(long)]
+        scope: Option<String>,
+    },
+    /// Execute a semantic action (find best candidate and click/focus it)
+    Act {
+        /// Semantic intent: submit_form, close_dialog, primary_cta, search_field,
+        /// next_step, dismiss, auth_action, back_navigation
+        #[arg(long)]
+        intent: String,
+        /// CSS selector to narrow the search area
+        #[arg(long)]
+        scope: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -450,6 +488,18 @@ async fn main() {
             index,
             url_pattern,
         } => cmd_select_frame(&cli, name.as_deref(), *index, url_pattern.as_deref()).await,
+        Commands::AnalyzeForm { selector } => {
+            cmd_analyze_form(&cli, selector.as_deref()).await
+        }
+        Commands::FillForm {
+            values,
+            selector,
+            submit,
+        } => cmd_fill_form(&cli, values, selector.as_deref(), *submit).await,
+        Commands::FindBest { intent, scope } => {
+            cmd_find_best(&cli, intent, scope.as_deref()).await
+        }
+        Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
     };
 
     if let Err(e) = result {
@@ -1028,6 +1078,51 @@ async fn cmd_select_frame(
     let resp =
         daemon_client::send_request("select_frame", params, cli.browser_path.as_deref()).await?;
     handle_response(cli, resp, output::format_text_select_frame)
+}
+
+async fn cmd_analyze_form(cli: &Cli, selector: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp =
+        daemon_client::send_request("analyze_form", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_analyze_form)
+}
+
+async fn cmd_fill_form(cli: &Cli, values: &str, selector: Option<&str>, submit: bool) -> CmdResult {
+    let values_value: serde_json::Value =
+        serde_json::from_str(values).map_err(|e| format!("invalid values JSON: {e}"))?;
+    let mut params = serde_json::json!({
+        "values": values_value,
+        "submit": submit,
+    });
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp =
+        daemon_client::send_request("fill_form", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_fill_form)
+}
+
+async fn cmd_find_best(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({"intent": intent});
+    if let Some(s) = scope {
+        params["scope"] = serde_json::json!(s);
+    }
+    let resp =
+        daemon_client::send_request("find_best", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_find_best)
+}
+
+async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({"intent": intent});
+    if let Some(s) = scope {
+        params["scope"] = serde_json::json!(s);
+    }
+    let resp =
+        daemon_client::send_request("act", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_act)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
