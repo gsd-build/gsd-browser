@@ -1,4 +1,5 @@
 pub mod assert_cmd;
+pub mod auth_vault;
 pub mod batch;
 pub mod device;
 pub mod extract;
@@ -13,6 +14,7 @@ pub mod pdf;
 pub mod refs;
 pub mod screenshot;
 pub mod session;
+pub mod state_persist;
 pub mod timeline;
 pub mod visual_diff;
 pub mod wait;
