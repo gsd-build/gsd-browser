@@ -1,0 +1,19 @@
+# Source and build files
+*.rs
+*.toml
+target/
+cli/
+common/
+daemon/
+.gsd/
+.git/
+.gitignore
+
+# Dev files
+*.md
+!README.md
+tests/
+docs/
+examples/
+.github/
+.vscode/
