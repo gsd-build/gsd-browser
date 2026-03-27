@@ -8,5 +8,6 @@ pub mod navigate;
 pub mod pages;
 pub mod refs;
 pub mod screenshot;
+pub mod session;
 pub mod timeline;
 pub mod wait;

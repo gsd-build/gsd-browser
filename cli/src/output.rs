@@ -1272,6 +1272,123 @@ pub fn format_text_act(result: &Value) -> String {
     lines.join("\n")
 }
 
+/// Format session-summary result — structured diagnostic snapshot.
+pub fn format_text_session_summary(result: &Value) -> String {
+    let mut lines = Vec::new();
+
+    // Active page
+    if let Some(page) = result.get("activePage") {
+        let url = page.get("url").and_then(|v| v.as_str()).unwrap_or("");
+        let title = page.get("title").and_then(|v| v.as_str()).unwrap_or("");
+        let id = page.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+        lines.push(format!("Active page [{id}]: {url}"));
+        if !title.is_empty() {
+            lines.push(format!("  Title: {title}"));
+        }
+    }
+
+    let page_count = result
+        .get("pageCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    lines.push(format!("Pages: {page_count}"));
+
+    // Selected frame
+    if let Some(frame) = result.get("selectedFrame").and_then(|v| v.as_str()) {
+        lines.push(format!("Selected frame: {frame}"));
+    }
+
+    // Actions
+    if let Some(actions) = result.get("actions") {
+        let total = actions.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        let ok = actions.get("ok").and_then(|v| v.as_u64()).unwrap_or(0);
+        let error = actions.get("error").and_then(|v| v.as_u64()).unwrap_or(0);
+        let running = actions.get("running").and_then(|v| v.as_u64()).unwrap_or(0);
+        let waits = actions
+            .get("waitCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let asserts = actions
+            .get("assertCount")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        lines.push(format!(
+            "Actions: {total} total ({ok} ok, {error} error, {running} running)"
+        ));
+        lines.push(format!("  Waits: {waits}, Asserts: {asserts}"));
+    }
+
+    // Console
+    if let Some(console) = result.get("console") {
+        let total = console.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        let errors = console
+            .get("errors")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let error_flag = if errors > 0 { " ⚠" } else { "" };
+        lines.push(format!("Console: {total} entries, {errors} errors{error_flag}"));
+    }
+
+    // Network
+    if let Some(network) = result.get("network") {
+        let total = network.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        let failed = network
+            .get("failed")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let fail_flag = if failed > 0 { " ⚠" } else { "" };
+        lines.push(format!("Network: {total} requests, {failed} failed{fail_flag}"));
+    }
+
+    // Dialog
+    if let Some(dialog) = result.get("dialog") {
+        let total = dialog.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
+        if total > 0 {
+            lines.push(format!("Dialogs: {total}"));
+        }
+    }
+
+    // Bounded history caveat
+    let bounded = result
+        .get("boundedHistory")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if bounded {
+        let caveat = result
+            .get("boundedHistoryCaveat")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Timeline history capped");
+        lines.push(format!("⚠ {caveat}"));
+    }
+
+    lines.join("\n")
+}
+
+/// Format debug-bundle result — show path and files written.
+pub fn format_text_debug_bundle(result: &Value) -> String {
+    let path = result
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
+    let file_count = result
+        .get("fileCount")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let mut lines = vec![format!("Debug bundle: {path}")];
+    lines.push(format!("Files: {file_count}"));
+
+    if let Some(files) = result.get("files").and_then(|v| v.as_array()) {
+        for f in files {
+            if let Some(name) = f.as_str() {
+                lines.push(format!("  • {name}"));
+            }
+        }
+    }
+
+    lines.join("\n")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
