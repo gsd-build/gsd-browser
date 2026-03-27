@@ -285,6 +285,18 @@ enum Commands {
         #[arg(long)]
         since: Option<u64>,
     },
+    /// Execute multiple browser steps in sequence
+    Batch {
+        /// JSON array of step objects (each with "action" and action-specific fields)
+        #[arg(long)]
+        steps: String,
+        /// Stop on first failing step (default: true)
+        #[arg(long, default_value = "true")]
+        stop_on_failure: bool,
+        /// Return only the final summary, omitting per-step details
+        #[arg(long)]
+        summary_only: bool,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -398,6 +410,11 @@ async fn main() {
         } => cmd_fill_ref(&cli, ref_str, text, *clear_first, *submit, *slowly).await,
         Commands::Assert { checks } => cmd_assert(&cli, checks).await,
         Commands::Diff { since } => cmd_diff(&cli, *since).await,
+        Commands::Batch {
+            steps,
+            stop_on_failure,
+            summary_only,
+        } => cmd_batch(&cli, steps, *stop_on_failure, *summary_only).await,
     };
 
     if let Err(e) = result {
@@ -904,6 +921,23 @@ async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
     let resp =
         daemon_client::send_request("diff", params, cli.browser_path.as_deref()).await?;
     handle_response(cli, resp, output::format_text_diff)
+}
+
+async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: bool) -> CmdResult {
+    // Parse the steps JSON to validate it before sending
+    let steps_value: serde_json::Value =
+        serde_json::from_str(steps).map_err(|e| format!("invalid steps JSON: {e}"))?;
+    let resp = daemon_client::send_request(
+        "batch",
+        serde_json::json!({
+            "steps": steps_value,
+            "stop_on_failure": stop_on_failure,
+            "summary_only": summary_only,
+        }),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_batch)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
