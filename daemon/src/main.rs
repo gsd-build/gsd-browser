@@ -1,3 +1,7 @@
+mod capture;
+mod helpers;
+mod settle;
+
 use browser_tools_common::{
     ipc, pid_path, socket_path, state_dir, DaemonRequest, DaemonResponse, ERR_INTERNAL,
     ERR_METHOD_NOT_FOUND,
@@ -104,8 +108,13 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Create initial page
-    let _page = browser.new_page("about:blank").await?;
+    let page = browser.new_page("about:blank").await?;
     info!("[browser-tools-daemon] initial page created");
+
+    // Inject browser-side helpers and install mutation counter
+    helpers::inject_helpers(&page).await;
+    settle::ensure_mutation_counter(&page).await;
+    info!("[browser-tools-daemon] browser helpers injected, mutation counter installed");
 
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
