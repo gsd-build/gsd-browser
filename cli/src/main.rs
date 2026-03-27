@@ -297,6 +297,32 @@ enum Commands {
         #[arg(long)]
         summary_only: bool,
     },
+    /// List all open browser pages/tabs
+    ListPages,
+    /// Switch active page by ID
+    SwitchPage {
+        /// Page ID to switch to (from list-pages)
+        id: u64,
+    },
+    /// Close a browser page by ID
+    ClosePage {
+        /// Page ID to close (from list-pages)
+        id: u64,
+    },
+    /// List all frames in the active page
+    ListFrames,
+    /// Select a frame for subsequent operations
+    SelectFrame {
+        /// Frame name to select ('main' to reset to main frame)
+        #[arg(long)]
+        name: Option<String>,
+        /// Frame index (from list-frames)
+        #[arg(long)]
+        index: Option<u64>,
+        /// URL substring to match
+        #[arg(long)]
+        url_pattern: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -415,6 +441,15 @@ async fn main() {
             stop_on_failure,
             summary_only,
         } => cmd_batch(&cli, steps, *stop_on_failure, *summary_only).await,
+        Commands::ListPages => cmd_list_pages(&cli).await,
+        Commands::SwitchPage { id } => cmd_switch_page(&cli, *id).await,
+        Commands::ClosePage { id } => cmd_close_page(&cli, *id).await,
+        Commands::ListFrames => cmd_list_frames(&cli).await,
+        Commands::SelectFrame {
+            name,
+            index,
+            url_pattern,
+        } => cmd_select_frame(&cli, name.as_deref(), *index, url_pattern.as_deref()).await,
     };
 
     if let Err(e) = result {
@@ -938,6 +973,61 @@ async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: 
     )
     .await?;
     handle_response(cli, resp, output::format_text_batch)
+}
+
+async fn cmd_list_pages(cli: &Cli) -> CmdResult {
+    let resp =
+        daemon_client::send_request("list_pages", serde_json::json!({}), cli.browser_path.as_deref())
+            .await?;
+    handle_response(cli, resp, output::format_text_list_pages)
+}
+
+async fn cmd_switch_page(cli: &Cli, id: u64) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "switch_page",
+        serde_json::json!({"id": id}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_switch_page)
+}
+
+async fn cmd_close_page(cli: &Cli, id: u64) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "close_page",
+        serde_json::json!({"id": id}),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_close_page)
+}
+
+async fn cmd_list_frames(cli: &Cli) -> CmdResult {
+    let resp =
+        daemon_client::send_request("list_frames", serde_json::json!({}), cli.browser_path.as_deref())
+            .await?;
+    handle_response(cli, resp, output::format_text_list_frames)
+}
+
+async fn cmd_select_frame(
+    cli: &Cli,
+    name: Option<&str>,
+    index: Option<u64>,
+    url_pattern: Option<&str>,
+) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(n) = name {
+        params["name"] = serde_json::json!(n);
+    }
+    if let Some(idx) = index {
+        params["index"] = serde_json::json!(idx);
+    }
+    if let Some(pat) = url_pattern {
+        params["urlPattern"] = serde_json::json!(pat);
+    }
+    let resp =
+        daemon_client::send_request("select_frame", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_select_frame)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.

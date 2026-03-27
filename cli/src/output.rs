@@ -901,6 +901,111 @@ pub fn format_text_batch(result: &Value) -> String {
     lines.join("\n")
 }
 
+/// Format list-pages result in text mode — one line per page.
+pub fn format_text_list_pages(result: &Value) -> String {
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let active_id = result
+        .get("activePageId")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+
+    let pages = result.get("pages").and_then(|v| v.as_array());
+    match pages {
+        Some(pages) if !pages.is_empty() => {
+            let lines: Vec<String> = pages
+                .iter()
+                .map(|p| {
+                    let id = p.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let title = p.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = p.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let marker = if id == active_id { " *" } else { "" };
+                    let title_display = if title.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" \"{title}\"")
+                    };
+                    format!("  [{id}]{marker}{title_display} — {url}")
+                })
+                .collect();
+            format!("Pages ({count}):\n{}", lines.join("\n"))
+        }
+        _ => "No pages open".to_string(),
+    }
+}
+
+/// Format switch-page result in text mode.
+pub fn format_text_switch_page(result: &Value) -> String {
+    let id = result.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("");
+    format!("Switched to page [{id}]: {url}\nTitle: {title}")
+}
+
+/// Format close-page result in text mode.
+pub fn format_text_close_page(result: &Value) -> String {
+    let id = result.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+    let active_id = result
+        .get("activePageId")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    format!("Closed page [{id}]. Active page: [{active_id}]")
+}
+
+/// Format list-frames result in text mode — one line per frame.
+pub fn format_text_list_frames(result: &Value) -> String {
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+    let frames = result.get("frames").and_then(|v| v.as_array());
+
+    match frames {
+        Some(frames) if !frames.is_empty() => {
+            let lines: Vec<String> = frames
+                .iter()
+                .map(|f| {
+                    let index = f.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = f.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let is_main = f.get("isMain").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let parent = f
+                        .get("parentName")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let marker = if is_main { " [main]" } else { "" };
+                    let name_display = if name.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" name=\"{name}\"")
+                    };
+                    let parent_display = if parent.is_empty() || is_main {
+                        String::new()
+                    } else {
+                        format!(" parent=\"{parent}\"")
+                    };
+                    format!("  [{index}]{marker}{name_display} — {url}{parent_display}")
+                })
+                .collect();
+            format!("Frames ({count}):\n{}", lines.join("\n"))
+        }
+        _ => "No frames found".to_string(),
+    }
+}
+
+/// Format select-frame result in text mode.
+pub fn format_text_select_frame(result: &Value) -> String {
+    let selected = result
+        .get("selected")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let frame = result
+        .get("frame")
+        .and_then(|v| v.as_str())
+        .unwrap_or("main");
+    if selected {
+        format!("Selected frame: {frame}")
+    } else {
+        "Reset to main frame".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

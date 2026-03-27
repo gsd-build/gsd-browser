@@ -1,9 +1,11 @@
-//! Daemon-side state management for action timeline, versioned refs, and diff snapshots.
+//! Daemon-side state management for action timeline, versioned refs, diff snapshots,
+//! page registry, and frame selection.
 
 use browser_tools_common::types::{ActionEntry, CompactPageState};
+use chromiumoxide::Page;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum number of action entries kept in the timeline FIFO.
@@ -17,11 +19,105 @@ fn now_epoch_secs() -> f64 {
         .as_secs_f64()
 }
 
+/// An entry in the page registry — one per open browser page/tab.
+pub struct PageEntry {
+    pub id: u64,
+    pub page: Arc<Page>,
+    pub title: String,
+    pub url: String,
+}
+
+/// Registry tracking all open pages and the currently active one.
+pub struct PageRegistry {
+    pub entries: Vec<PageEntry>,
+    pub active_page_id: u64,
+    next_id: u64,
+}
+
+impl PageRegistry {
+    pub fn new() -> Self {
+        Self {
+            entries: Vec::new(),
+            active_page_id: 0,
+            next_id: 1,
+        }
+    }
+
+    /// Register a new page and return its assigned ID.
+    pub fn register(&mut self, page: Arc<Page>, title: String, url: String) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.entries.push(PageEntry {
+            id,
+            page,
+            title,
+            url,
+        });
+        // If this is the first page, make it active
+        if self.entries.len() == 1 {
+            self.active_page_id = id;
+        }
+        id
+    }
+
+    /// Get the active page (cloned Arc).
+    pub fn active_page(&self) -> Option<Arc<Page>> {
+        self.entries
+            .iter()
+            .find(|e| e.id == self.active_page_id)
+            .map(|e| Arc::clone(&e.page))
+    }
+
+    /// Set the active page ID. Returns false if the ID doesn't exist.
+    pub fn set_active(&mut self, id: u64) -> bool {
+        if self.entries.iter().any(|e| e.id == id) {
+            self.active_page_id = id;
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Remove a page by ID. Returns Err if it's the last page or ID not found.
+    pub fn remove(&mut self, id: u64) -> Result<Arc<Page>, String> {
+        if self.entries.len() <= 1 {
+            return Err("cannot close the last page".to_string());
+        }
+        let pos = self
+            .entries
+            .iter()
+            .position(|e| e.id == id)
+            .ok_or_else(|| format!("page id {id} not found"))?;
+        let removed = self.entries.remove(pos);
+        // If we removed the active page, fall back to the first remaining page
+        if self.active_page_id == id {
+            self.active_page_id = self.entries[0].id;
+        }
+        Ok(removed.page)
+    }
+
+    /// Update stored title/url for a page.
+    pub fn update_metadata(&mut self, id: u64, title: String, url: String) {
+        if let Some(entry) = self.entries.iter_mut().find(|e| e.id == id) {
+            entry.title = title;
+            entry.url = url;
+        }
+    }
+
+    /// Number of open pages.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+}
+
 /// Top-level daemon state shared across all connections.
 pub struct DaemonState {
     pub timeline: Mutex<ActionTimeline>,
     pub refs: Mutex<RefStore>,
     pub diff: Mutex<DiffState>,
+    pub pages: Mutex<PageRegistry>,
+    pub selected_frame: Mutex<Option<String>>,
 }
 
 impl DaemonState {
@@ -30,6 +126,8 @@ impl DaemonState {
             timeline: Mutex::new(ActionTimeline::new()),
             refs: Mutex::new(RefStore::new()),
             diff: Mutex::new(DiffState::new()),
+            pages: Mutex::new(PageRegistry::new()),
+            selected_frame: Mutex::new(None),
         }
     }
 }
@@ -171,5 +269,24 @@ mod tests {
         let state = DaemonState::new();
         let timeline = state.timeline.lock().unwrap();
         assert_eq!(timeline.snapshot().len(), 0);
+        let pages = state.pages.lock().unwrap();
+        assert_eq!(pages.len(), 0);
+        let frame = state.selected_frame.lock().unwrap();
+        assert!(frame.is_none());
+    }
+
+    #[test]
+    fn page_registry_register_and_active() {
+        // We can't construct a real Page in unit tests, but we can test
+        // the registry logic separately with the ID/metadata operations.
+        let registry = PageRegistry::new();
+        assert_eq!(registry.len(), 0);
+        assert!(registry.active_page().is_none());
+    }
+
+    #[test]
+    fn page_registry_set_active_invalid() {
+        let mut registry = PageRegistry::new();
+        assert!(!registry.set_active(999));
     }
 }

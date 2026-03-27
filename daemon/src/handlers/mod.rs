@@ -3,6 +3,7 @@ pub mod batch;
 pub mod inspect;
 pub mod interaction;
 pub mod navigate;
+pub mod pages;
 pub mod refs;
 pub mod screenshot;
 pub mod timeline;

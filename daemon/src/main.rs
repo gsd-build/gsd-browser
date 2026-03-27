@@ -153,8 +153,12 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     logs::spawn_dialog_listener(&page, daemon_logs.dialog.clone()).await;
     info!("[browser-tools-daemon] event listeners spawned");
 
-    // Wrap page in Arc for sharing across connection tasks
-    let page = Arc::new(page);
+    // Register initial page in the PageRegistry
+    {
+        let page_arc = Arc::new(page);
+        let mut pages = daemon_state.pages.lock().unwrap();
+        pages.register(page_arc, String::new(), "about:blank".to_string());
+    }
 
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
@@ -173,10 +177,9 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
                 match accept_result {
                     Ok((stream, _addr)) => {
                         info!("[browser-tools-daemon] connection accepted");
-                        let page = Arc::clone(&page);
                         let logs = Arc::clone(&daemon_logs);
                         let state = Arc::clone(&daemon_state);
-                        tokio::spawn(handle_connection(stream, page, logs, state));
+                        tokio::spawn(handle_connection(stream, logs, state));
                     }
                     Err(e) => {
                         error!("[browser-tools-daemon] accept error: {e}");
@@ -204,7 +207,6 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
 
 async fn handle_connection(
     mut stream: tokio::net::UnixStream,
-    page: Arc<Page>,
     logs: Arc<DaemonLogs>,
     state: Arc<DaemonState>,
 ) {
@@ -232,7 +234,20 @@ async fn handle_connection(
         request.method, request.id
     );
 
-    let response = dispatch(&request, &page, &logs, &state).await;
+    // Resolve the active page from the registry
+    let page = {
+        let pages = state.pages.lock().unwrap();
+        pages.active_page()
+    };
+
+    let response = match page {
+        Some(page) => dispatch(&request, &page, &logs, &state).await,
+        None => DaemonResponse::error(
+            request.id,
+            ERR_INTERNAL,
+            "no active page in registry".to_string(),
+        ),
+    };
 
     let payload = serde_json::to_vec(&response).unwrap();
     if let Err(e) = ipc::write_message(&mut stream, &payload).await {
@@ -501,6 +516,26 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "batch" => match handlers::batch::handle_batch(page, logs, state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "list_pages" => match handlers::pages::handle_list_pages(state) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "switch_page" => match handlers::pages::handle_switch_page(state, &req.params).await {
+            Ok((result, _new_page)) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "close_page" => match handlers::pages::handle_close_page(state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "list_frames" => match handlers::pages::handle_list_frames(page).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "select_frame" => match handlers::pages::handle_select_frame(state, &req.params) {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
