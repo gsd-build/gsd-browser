@@ -534,6 +534,78 @@ pub fn format_error_json(err: &RpcError) -> String {
     serde_json::to_string_pretty(&obj).unwrap_or_else(|_| "{}".to_string())
 }
 
+/// Format wait-for result in text mode.
+pub fn format_text_wait_for(result: &Value) -> String {
+    let condition = result
+        .get("condition")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let met = result.get("met").and_then(|v| v.as_bool()).unwrap_or(false);
+    let elapsed = result
+        .get("elapsed_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let timeout = result
+        .get("timeout_ms")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let value = result
+        .get("value")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let status = if met { "✓ met" } else { "✗ timeout" };
+
+    let mut out = format!("Wait: {condition} {status} ({elapsed}ms / {timeout}ms timeout)");
+    if !value.is_empty() {
+        out.push_str(&format!("\nValue: {value}"));
+    }
+    out
+}
+
+/// Format timeline result in text mode — table of action entries.
+pub fn format_text_timeline(result: &Value) -> String {
+    let entries = result.get("entries").and_then(|v| v.as_array());
+    let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    match entries {
+        Some(entries) if !entries.is_empty() => {
+            let mut lines = vec![format!(
+                "{:<4} {:<14} {:<10} {:<30}",
+                "ID", "Tool", "Status", "Params"
+            )];
+            lines.push("-".repeat(60));
+            for e in entries {
+                let id = e.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
+                let tool = e
+                    .get("tool")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let status = e
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("?");
+                let params = e
+                    .get("paramsSummary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let display_params = if params.len() > 30 {
+                    format!("{}…", &params[..29])
+                } else {
+                    params.to_string()
+                };
+                lines.push(format!(
+                    "{:<4} {:<14} {:<10} {:<30}",
+                    id, tool, status, display_params
+                ));
+            }
+            lines.push(format!("\n{count} entries"));
+            lines.join("\n")
+        }
+        _ => format!("No timeline entries ({count} total)"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
