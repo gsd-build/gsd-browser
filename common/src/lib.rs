@@ -1,5 +1,6 @@
 pub mod chrome;
 pub mod ipc;
+pub mod types;
 
 use serde::{Deserialize, Serialize};
 
