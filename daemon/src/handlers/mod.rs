@@ -1,13 +1,16 @@
 pub mod assert_cmd;
 pub mod batch;
+pub mod extract;
 pub mod forms;
 pub mod inspect;
 pub mod intent;
 pub mod interaction;
 pub mod navigate;
 pub mod pages;
+pub mod pdf;
 pub mod refs;
 pub mod screenshot;
 pub mod session;
 pub mod timeline;
+pub mod visual_diff;
 pub mod wait;

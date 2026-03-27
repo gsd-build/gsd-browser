@@ -369,6 +369,66 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Compare page screenshot against a stored baseline
+    VisualDiff {
+        /// Baseline name (default: auto from URL + viewport)
+        #[arg(long)]
+        name: Option<String>,
+        /// CSS selector to scope comparison
+        #[arg(long)]
+        selector: Option<String>,
+        /// Pixel matching tolerance 0–1 (default: 0.1)
+        #[arg(long)]
+        threshold: Option<f64>,
+        /// Overwrite existing baseline with current screenshot
+        #[arg(long)]
+        update_baseline: bool,
+    },
+    /// Capture and upscale a rectangular region of the page
+    ZoomRegion {
+        /// Left coordinate in CSS pixels
+        #[arg(long)]
+        x: f64,
+        /// Top coordinate in CSS pixels
+        #[arg(long)]
+        y: f64,
+        /// Width of region in CSS pixels
+        #[arg(long)]
+        width: f64,
+        /// Height of region in CSS pixels
+        #[arg(long)]
+        height: f64,
+        /// Upscale factor (default: 2)
+        #[arg(long, default_value = "2")]
+        scale: f64,
+    },
+    /// Save the current page as a PDF file
+    SavePdf {
+        /// Page format: A4, Letter, Legal, Tabloid (default: A4)
+        #[arg(long, default_value = "A4")]
+        format: String,
+        /// Include background graphics (default: true)
+        #[arg(long, default_value = "true")]
+        print_background: bool,
+        /// Output filename
+        #[arg(long)]
+        filename: Option<String>,
+        /// Full output path (overrides default directory)
+        #[arg(long)]
+        output: Option<String>,
+    },
+    /// Extract structured data from the page using CSS selectors
+    Extract {
+        /// JSON schema with _selector and _attribute hints per property
+        #[arg(long)]
+        schema: String,
+        /// CSS selector to scope extraction
+        #[arg(long)]
+        selector: Option<String>,
+        /// Extract array of items (container selector mode)
+        #[arg(long)]
+        multiple: bool,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -510,6 +570,30 @@ async fn main() {
         Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
+        Commands::VisualDiff {
+            name,
+            selector,
+            threshold,
+            update_baseline,
+        } => cmd_visual_diff(&cli, name.as_deref(), selector.as_deref(), *threshold, *update_baseline).await,
+        Commands::ZoomRegion {
+            x,
+            y,
+            width,
+            height,
+            scale,
+        } => cmd_zoom_region(&cli, *x, *y, *width, *height, *scale).await,
+        Commands::SavePdf {
+            format,
+            print_background,
+            filename,
+            output,
+        } => cmd_save_pdf(&cli, format, *print_background, filename.as_deref(), output.as_deref()).await,
+        Commands::Extract {
+            schema,
+            selector,
+            multiple,
+        } => cmd_extract(&cli, schema, selector.as_deref(), *multiple).await,
     };
 
     if let Err(e) = result {
@@ -1157,6 +1241,80 @@ async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, output::format_text_debug_bundle)
+}
+
+async fn cmd_visual_diff(
+    cli: &Cli,
+    name: Option<&str>,
+    selector: Option<&str>,
+    threshold: Option<f64>,
+    update_baseline: bool,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "update_baseline": update_baseline,
+    });
+    if let Some(n) = name {
+        params["name"] = serde_json::json!(n);
+    }
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    if let Some(t) = threshold {
+        params["threshold"] = serde_json::json!(t);
+    }
+    let resp = daemon_client::send_request("visual_diff", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_visual_diff)
+}
+
+async fn cmd_zoom_region(cli: &Cli, x: f64, y: f64, width: f64, height: f64, scale: f64) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "zoom_region",
+        serde_json::json!({
+            "x": x,
+            "y": y,
+            "width": width,
+            "height": height,
+            "scale": scale,
+        }),
+        cli.browser_path.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_zoom_region)
+}
+
+async fn cmd_save_pdf(
+    cli: &Cli,
+    format: &str,
+    print_background: bool,
+    filename: Option<&str>,
+    output: Option<&str>,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "format": format,
+        "print_background": print_background,
+    });
+    if let Some(f) = filename {
+        params["filename"] = serde_json::json!(f);
+    }
+    if let Some(o) = output {
+        params["output"] = serde_json::json!(o);
+    }
+    let resp = daemon_client::send_request("save_pdf", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_save_pdf)
+}
+
+async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: bool) -> CmdResult {
+    let schema_value: serde_json::Value =
+        serde_json::from_str(schema).map_err(|e| format!("invalid schema JSON: {e}"))?;
+    let mut params = serde_json::json!({
+        "schema": schema_value,
+        "multiple": multiple,
+    });
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+    let resp = daemon_client::send_request("extract", params, cli.browser_path.as_deref()).await?;
+    handle_response(cli, resp, output::format_text_extract)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
