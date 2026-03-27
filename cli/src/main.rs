@@ -504,6 +504,57 @@ enum Commands {
     },
     /// List all saved vault profiles (no credentials shown)
     VaultList,
+    /// Manage the action cache (stats, get, put, clear)
+    ActionCache {
+        /// Action: stats, get, put, clear
+        #[arg(long, default_value = "stats")]
+        action: String,
+        /// Intent key (for get/put)
+        #[arg(long)]
+        intent: Option<String>,
+        /// CSS selector to cache (for put)
+        #[arg(long)]
+        selector: Option<String>,
+        /// Confidence score 0–1 (for put, default: 1.0)
+        #[arg(long)]
+        score: Option<f64>,
+    },
+    /// Scan page content for prompt injection attempts
+    CheckInjection {
+        /// Also scan hidden/invisible text (default: true)
+        #[arg(long, default_value = "true")]
+        include_hidden: bool,
+    },
+    /// Generate a Playwright test from the recorded action timeline
+    GenerateTest {
+        /// Test name (default: recorded-session)
+        #[arg(long, default_value = "recorded-session")]
+        name: String,
+        /// Output file path
+        #[arg(long)]
+        output: Option<String>,
+        /// Include assertion steps (default: true)
+        #[arg(long, default_value = "true")]
+        include_assertions: bool,
+    },
+    /// Export network logs as a HAR 1.2 JSON file
+    HarExport {
+        /// Output filename/path
+        #[arg(long)]
+        filename: Option<String>,
+    },
+    /// Start a CDP performance trace
+    TraceStart {
+        /// Optional trace session name
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Stop an active CDP trace and write data to file
+    TraceStop {
+        /// Optional output filename override
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -691,6 +742,23 @@ async fn main() {
         } => cmd_vault_save(&cli, &profile, &url, &username, &password, extra_fields.as_deref()).await,
         Commands::VaultLogin { profile } => cmd_vault_login(&cli, &profile).await,
         Commands::VaultList => cmd_vault_list(&cli).await,
+        Commands::ActionCache {
+            action,
+            intent,
+            selector,
+            score,
+        } => cmd_action_cache(&cli, &action, intent.as_deref(), selector.as_deref(), *score).await,
+        Commands::CheckInjection { include_hidden } => {
+            cmd_check_injection(&cli, *include_hidden).await
+        }
+        Commands::GenerateTest {
+            name,
+            output,
+            include_assertions,
+        } => cmd_generate_test(&cli, &name, output.as_deref(), *include_assertions).await,
+        Commands::HarExport { filename } => cmd_har_export(&cli, filename.as_deref()).await,
+        Commands::TraceStart { name } => cmd_trace_start(&cli, name.as_deref()).await,
+        Commands::TraceStop { name } => cmd_trace_stop(&cli, name.as_deref()).await,
     };
 
     if let Err(e) = result {
@@ -1574,6 +1642,112 @@ async fn cmd_vault_list(cli: &Cli) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, output::format_text_vault_list)
+}
+
+async fn cmd_action_cache(
+    cli: &Cli,
+    action: &str,
+    intent: Option<&str>,
+    selector: Option<&str>,
+    score: Option<f64>,
+) -> CmdResult {
+    let mut params = serde_json::json!({"action": action});
+    if let Some(i) = intent {
+        params["intent"] = serde_json::json!(i);
+    }
+    if let Some(s) = selector {
+        params["selector"] = serde_json::json!(s);
+    }
+    if let Some(sc) = score {
+        params["score"] = serde_json::json!(sc);
+    }
+    let resp = daemon_client::send_request(
+        "action_cache",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_action_cache)
+}
+
+async fn cmd_check_injection(cli: &Cli, include_hidden: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "check_injection",
+        serde_json::json!({"includeHidden": include_hidden}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_check_injection)
+}
+
+async fn cmd_generate_test(
+    cli: &Cli,
+    name: &str,
+    output_path: Option<&str>,
+    include_assertions: bool,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "name": name,
+        "includeAssertions": include_assertions,
+    });
+    if let Some(o) = output_path {
+        params["outputPath"] = serde_json::json!(o);
+    }
+    let resp = daemon_client::send_request(
+        "generate_test",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_generate_test)
+}
+
+async fn cmd_har_export(cli: &Cli, filename: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(f) = filename {
+        params["filename"] = serde_json::json!(f);
+    }
+    let resp = daemon_client::send_request(
+        "har_export",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_har_export)
+}
+
+async fn cmd_trace_start(cli: &Cli, name: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(n) = name {
+        params["name"] = serde_json::json!(n);
+    }
+    let resp = daemon_client::send_request(
+        "trace_start",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_trace_start)
+}
+
+async fn cmd_trace_stop(cli: &Cli, name: Option<&str>) -> CmdResult {
+    let mut params = serde_json::json!({});
+    if let Some(n) = name {
+        params["name"] = serde_json::json!(n);
+    }
+    let resp = daemon_client::send_request(
+        "trace_stop",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_text_trace_stop)
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
