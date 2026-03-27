@@ -282,6 +282,69 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> Daemon
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "click" => match handlers::interaction::handle_click(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check selector is valid and element exists"}),
+            ),
+        },
+        "type" => match handlers::interaction::handle_type_text(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check selector targets an input/textarea element"}),
+            ),
+        },
+        "press" => match handlers::interaction::handle_press(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "hover" => match handlers::interaction::handle_hover(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check selector is valid and element exists"}),
+            ),
+        },
+        "scroll" => match handlers::interaction::handle_scroll(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "select_option" => {
+            match handlers::interaction::handle_select_option(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "set_checked" => {
+            match handlers::interaction::handle_set_checked(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "drag" => match handlers::interaction::handle_drag(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "set_viewport" => {
+            match handlers::interaction::handle_set_viewport(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "upload_file" => {
+            match handlers::interaction::handle_upload_file(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
