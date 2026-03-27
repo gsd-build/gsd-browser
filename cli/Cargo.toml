@@ -1,0 +1,18 @@
+[package]
+name = "browser-tools"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "browser-tools"
+path = "src/main.rs"
+
+[dependencies]
+browser-tools-common = { path = "../common" }
+clap = { workspace = true }
+libc = { workspace = true }
+nix = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+which = { workspace = true }
