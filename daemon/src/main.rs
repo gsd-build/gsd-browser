@@ -345,6 +345,15 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs) -> Daemon
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
+        "screenshot" => match handlers::screenshot::handle_screenshot(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error_with_data(
+                req.id,
+                ERR_INTERNAL,
+                &msg,
+                json!({"retryHint": "Check selector is valid or try without --selector"}),
+            ),
+        }
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,

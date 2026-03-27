@@ -8,6 +8,7 @@ name = "browser-tools"
 path = "src/main.rs"
 
 [dependencies]
+base64 = "0.22"
 browser-tools-common = { path = "../common" }
 clap = { workspace = true }
 libc = { workspace = true }

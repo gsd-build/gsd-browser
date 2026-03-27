@@ -149,6 +149,24 @@ enum Commands {
         /// File paths to upload
         files: Vec<String>,
     },
+    /// Take a screenshot of the current page or a specific element
+    Screenshot {
+        /// CSS selector for element crop (produces PNG)
+        #[arg(long)]
+        selector: Option<String>,
+        /// Capture full scrollable page
+        #[arg(long)]
+        full_page: bool,
+        /// JPEG quality 1-100 (default: 80)
+        #[arg(long, default_value = "80")]
+        quality: u32,
+        /// Output file path — writes raw image bytes to disk
+        #[arg(long)]
+        output: Option<String>,
+        /// Image format: jpeg or png (default: jpeg)
+        #[arg(long, default_value = "jpeg")]
+        format: String,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -208,6 +226,23 @@ async fn main() {
             height,
         } => cmd_set_viewport(&cli, preset.as_deref(), *width, *height).await,
         Commands::UploadFile { selector, files } => cmd_upload_file(&cli, selector, files).await,
+        Commands::Screenshot {
+            selector,
+            full_page,
+            quality,
+            output,
+            format,
+        } => {
+            cmd_screenshot(
+                &cli,
+                selector.as_deref(),
+                *full_page,
+                *quality,
+                output.as_deref(),
+                format,
+            )
+            .await
+        }
     };
 
     if let Err(e) = result {
@@ -476,6 +511,64 @@ async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResu
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
+}
+
+async fn cmd_screenshot(
+    cli: &Cli,
+    selector: Option<&str>,
+    full_page: bool,
+    quality: u32,
+    output_path: Option<&str>,
+    format: &str,
+) -> CmdResult {
+    let mut params = serde_json::json!({
+        "full_page": full_page,
+        "quality": quality,
+        "format": format,
+    });
+    if let Some(sel) = selector {
+        params["selector"] = serde_json::json!(sel);
+    }
+
+    let resp =
+        daemon_client::send_request("screenshot", params, cli.browser_path.as_deref()).await?;
+
+    if let Some(err) = resp.error {
+        if cli.json {
+            eprintln!("{}", output::format_error_json(&err));
+        } else {
+            eprintln!("{}", output::format_error_text(&err));
+        }
+        std::process::exit(1);
+    }
+
+    if let Some(result) = resp.result {
+        // If --output is specified, decode base64 and write raw bytes to file
+        if let Some(path) = output_path {
+            let data_b64 = result
+                .get("data")
+                .and_then(|v| v.as_str())
+                .ok_or("screenshot response missing 'data' field")?;
+
+            use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+            let bytes = BASE64
+                .decode(data_b64)
+                .map_err(|e| format!("failed to decode base64: {e}"))?;
+
+            std::fs::write(path, &bytes)
+                .map_err(|e| format!("failed to write screenshot to '{path}': {e}"))?;
+
+            let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+            let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+            println!("Screenshot saved to {path} ({width}x{height})");
+        } else if cli.json {
+            println!("{}", output::format_json(&result));
+        } else {
+            println!("{}", output::format_text_screenshot(&result));
+        }
+    }
+
+    Ok(())
 }
 
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
