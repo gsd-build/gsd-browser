@@ -189,59 +189,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "browser-tools"
-version = "0.1.0"
-dependencies = [
- "base64",
- "browser-tools-common",
- "clap",
- "libc",
- "nix",
- "serde",
- "serde_json",
- "tokio",
- "which 7.0.3",
-]
-
-[[package]]
-name = "browser-tools-common"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "tokio",
- "toml",
- "tracing",
- "which 7.0.3",
-]
-
-[[package]]
-name = "browser-tools-daemon"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "argon2",
- "base64",
- "browser-tools-common",
- "chromiumoxide",
- "chrono",
- "dirs",
- "futures",
- "image",
- "nix",
- "rand 0.8.5",
- "regex-lite",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "bumpalo"
 version = "3.20.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -732,6 +679,59 @@ checksum = "f0d8a4362ccb29cb0b265253fb0a2728f592895ee6854fd9bc13f2ffda266ff1"
 dependencies = [
  "opaque-debug",
  "polyval",
+]
+
+[[package]]
+name = "gsd-browser"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "clap",
+ "gsd-browser-common",
+ "libc",
+ "nix",
+ "serde",
+ "serde_json",
+ "tokio",
+ "which 7.0.3",
+]
+
+[[package]]
+name = "gsd-browser-common"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml",
+ "tracing",
+ "which 7.0.3",
+]
+
+[[package]]
+name = "gsd-browser-daemon"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "argon2",
+ "base64",
+ "chromiumoxide",
+ "chrono",
+ "dirs",
+ "futures",
+ "gsd-browser-common",
+ "image",
+ "nix",
+ "rand 0.8.5",
+ "regex-lite",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

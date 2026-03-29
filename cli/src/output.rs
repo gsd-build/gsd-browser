@@ -3,7 +3,7 @@
 //! Ports `formatCompactStateSummary` from the reference `utils.js` to Rust,
 //! and provides per-command text formatters plus JSON/error formatting.
 
-use browser_tools_common::RpcError;
+use gsd_browser_common::RpcError;
 use serde_json::Value;
 
 /// Format compact page state summary — matches the reference formatCompactStateSummary.

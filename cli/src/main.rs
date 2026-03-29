@@ -1,11 +1,11 @@
 mod daemon_client;
 mod output;
 
-use browser_tools_common::config::Config;
+use gsd_browser_common::config::Config;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "browser-tools", about = "Browser automation CLI powered by CDP")]
+#[command(name = "gsd-browser", about = "Browser automation CLI powered by CDP")]
 pub struct Cli {
     /// Output as JSON
     #[arg(long, global = true)]
@@ -490,7 +490,7 @@ enum Commands {
         /// Username or email
         #[arg(long)]
         username: String,
-        /// Password (encrypted at rest with BROWSER_TOOLS_VAULT_KEY)
+        /// Password (encrypted at rest with GSD_BROWSER_VAULT_KEY)
         #[arg(long)]
         password: String,
         /// Extra fields as JSON (e.g. field_mappings for custom forms)
@@ -776,7 +776,7 @@ async fn main() {
             let err = serde_json::json!({
                 "error": {
                     "message": e.to_string(),
-                    "retryHint": "Check daemon status with: browser-tools daemon health"
+                    "retryHint": "Check daemon status with: gsd-browser daemon health"
                 }
             });
             eprintln!("{}", serde_json::to_string_pretty(&err).unwrap());
@@ -1763,7 +1763,7 @@ async fn cmd_trace_stop(cli: &Cli, name: Option<&str>) -> CmdResult {
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
 fn handle_response(
     cli: &Cli,
-    resp: browser_tools_common::DaemonResponse,
+    resp: gsd_browser_common::DaemonResponse,
     text_formatter: fn(&serde_json::Value) -> String,
 ) -> CmdResult {
     if let Some(err) = resp.error {

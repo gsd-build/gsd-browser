@@ -12,7 +12,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building workspace ==="
 cargo build --workspace --manifest-path "$PROJECT_DIR/Cargo.toml" 2>&1 | tail -1
 
-BIN="$PROJECT_DIR/target/debug/browser-tools"
+BIN="$PROJECT_DIR/target/debug/gsd-browser"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -32,9 +32,9 @@ check() {
 
 cleanup_daemon() {
     # Kill daemon by PID file
-    if [ -f ~/.browser-tools/daemon.pid ]; then
+    if [ -f ~/.gsd-browser/daemon.pid ]; then
         local pid
-        pid=$(cat ~/.browser-tools/daemon.pid 2>/dev/null)
+        pid=$(cat ~/.gsd-browser/daemon.pid 2>/dev/null)
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
@@ -44,7 +44,7 @@ cleanup_daemon() {
     sleep 2
     # Remove singleton lock (macOS-specific path varies)
     find /private/var/folders -name "SingletonLock" -path "*/chromiumoxide-runner/*" -delete 2>/dev/null || true
-    rm -f ~/.browser-tools/daemon.sock ~/.browser-tools/daemon.pid
+    rm -f ~/.gsd-browser/daemon.sock ~/.gsd-browser/daemon.pid
 }
 
 cleanup_temp_files() {

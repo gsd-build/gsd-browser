@@ -1,5 +1,5 @@
 [package]
-name = "browser-tools-common"
+name = "gsd-browser-common"
 version = "0.1.0"
 edition = "2021"
 publish = false

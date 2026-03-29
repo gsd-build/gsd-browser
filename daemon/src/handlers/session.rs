@@ -159,13 +159,13 @@ pub async fn handle_debug_bundle(
         .unwrap_or("");
 
     // Determine artifact root
-    let artifact_root = std::env::var("BROWSER_TOOLS_ARTIFACT_DIR")
+    let artifact_root = std::env::var("GSD_BROWSER_ARTIFACT_DIR")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
-                .join(".browser-tools")
+                .join(".gsd-browser")
                 .join("artifacts")
         });
 
@@ -331,7 +331,7 @@ mod tests {
     use super::*;
     use crate::logs::DaemonLogs;
     use crate::state::DaemonState;
-    use browser_tools_common::types::ConsoleLogEntry;
+    use gsd_browser_common::types::ConsoleLogEntry;
 
     #[test]
     fn session_summary_empty_state() {

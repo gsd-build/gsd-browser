@@ -11,7 +11,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building workspace ==="
 cargo build --workspace --manifest-path "$PROJECT_DIR/Cargo.toml" 2>&1 | tail -1
 
-BIN="$PROJECT_DIR/target/debug/browser-tools"
+BIN="$PROJECT_DIR/target/debug/gsd-browser"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -30,15 +30,15 @@ check() {
 }
 
 cleanup_daemon() {
-    if [ -f ~/.browser-tools/daemon.pid ]; then
+    if [ -f ~/.gsd-browser/daemon.pid ]; then
         local pid
-        pid=$(cat ~/.browser-tools/daemon.pid 2>/dev/null)
+        pid=$(cat ~/.gsd-browser/daemon.pid 2>/dev/null)
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
     fi
     # Also kill any session daemons
-    for pidfile in ~/.browser-tools/sessions/*/daemon.pid; do
+    for pidfile in ~/.gsd-browser/sessions/*/daemon.pid; do
         if [ -f "$pidfile" ]; then
             local pid
             pid=$(cat "$pidfile" 2>/dev/null)
@@ -47,11 +47,11 @@ cleanup_daemon() {
             fi
         fi
     done
-    pkill -f "browser-tools-daemon" 2>/dev/null || true
+    pkill -f "gsd-browser-daemon" 2>/dev/null || true
     sleep 2
     find /private/var/folders -name "SingletonLock" -path "*/chromiumoxide-runner/*" -delete 2>/dev/null || true
-    rm -f ~/.browser-tools/daemon.sock ~/.browser-tools/daemon.pid
-    rm -rf ~/.browser-tools/sessions/s05test1 ~/.browser-tools/sessions/s05test2
+    rm -f ~/.gsd-browser/daemon.sock ~/.gsd-browser/daemon.pid
+    rm -rf ~/.gsd-browser/sessions/s05test1 ~/.gsd-browser/sessions/s05test2
 }
 
 # ── Cleanup any existing daemon ──
@@ -61,12 +61,12 @@ cleanup_daemon
 echo "  Cleaned up stale daemon files"
 
 # Clean up artifacts from previous runs
-rm -rf ~/.browser-tools/baselines/s05-test.png
-rm -rf ~/.browser-tools/state/s05-test.json
-rm -rf ~/.browser-tools/artifacts/s05-*
+rm -rf ~/.gsd-browser/baselines/s05-test.png
+rm -rf ~/.gsd-browser/state/s05-test.json
+rm -rf ~/.gsd-browser/artifacts/s05-*
 
 # Create test HTML files
-TEST_FILE=$(mktemp /tmp/browser-tools-s05-XXXXXX.html)
+TEST_FILE=$(mktemp /tmp/gsd-browser-s05-XXXXXX.html)
 cat > "$TEST_FILE" << 'HTMLEOF'
 <!DOCTYPE html>
 <html>
@@ -89,7 +89,7 @@ HTMLEOF
 TEST_URL="file://$TEST_FILE"
 
 # Create injection test page
-INJECT_FILE=$(mktemp /tmp/browser-tools-s05-inject-XXXXXX.html)
+INJECT_FILE=$(mktemp /tmp/gsd-browser-s05-inject-XXXXXX.html)
 cat > "$INJECT_FILE" << 'INJECTEOF'
 <!DOCTYPE html>
 <html>
@@ -432,8 +432,8 @@ echo "$S1_NAV" | grep -q "S05 Test" 2>/dev/null
 check "session s05test1 navigates successfully" $?
 
 # Verify session-specific socket file exists
-S1_SOCK="$HOME/.browser-tools/sessions/s05test1/daemon.sock"
-S1_PID="$HOME/.browser-tools/sessions/s05test1/daemon.pid"
+S1_SOCK="$HOME/.gsd-browser/sessions/s05test1/daemon.sock"
+S1_PID="$HOME/.gsd-browser/sessions/s05test1/daemon.pid"
 [ -S "$S1_SOCK" ]
 check "session s05test1 uses session-specific socket" $?
 
@@ -448,7 +448,7 @@ if [ -f "$S1_PID" ]; then
     fi
 fi
 sleep 2
-rm -rf ~/.browser-tools/sessions/s05test1
+rm -rf ~/.gsd-browser/sessions/s05test1
 
 # ════════════════════════════════════════════
 #  Vault List (1 check — no key needed)
@@ -457,7 +457,7 @@ echo ""
 echo "=== Vault List (no vault key set) ==="
 
 VLIST=$("$BIN" --json vault-list 2>&1) || true
-# vault-list should work without BROWSER_TOOLS_VAULT_KEY (just lists profile names)
+# vault-list should work without GSD_BROWSER_VAULT_KEY (just lists profile names)
 echo "$VLIST" | python3 -c "import sys, json; d = json.load(sys.stdin); assert 'profiles' in d or 'error' in d" 2>/dev/null
 check "vault-list returns profiles or error structure" $?
 
@@ -469,8 +469,8 @@ echo "=== Cleanup (before S04 regression) ==="
 cleanup_daemon
 rm -f "$TEST_FILE" "$INJECT_FILE"
 # Clean up baselines and state files from this test
-rm -f ~/.browser-tools/baselines/s05-test.png
-rm -f ~/.browser-tools/state/s05-test.json
+rm -f ~/.gsd-browser/baselines/s05-test.png
+rm -f ~/.gsd-browser/state/s05-test.json
 echo "  Daemon stopped, temp files cleaned"
 
 # ════════════════════════════════════════════

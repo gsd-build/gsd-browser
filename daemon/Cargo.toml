@@ -1,12 +1,12 @@
 [package]
-name = "browser-tools-daemon"
+name = "gsd-browser-daemon"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 [dependencies]
 base64 = "0.22"
-browser-tools-common = { path = "../common" }
+gsd-browser-common = { path = "../common" }
 chrono = { workspace = true }
 chromiumoxide = { workspace = true }
 dirs = { workspace = true }

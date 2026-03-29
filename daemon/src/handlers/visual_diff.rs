@@ -9,11 +9,11 @@ use std::io::Cursor;
 use std::path::PathBuf;
 use tracing::debug;
 
-/// Get the baselines directory at ~/.browser-tools/baselines/
+/// Get the baselines directory at ~/.gsd-browser/baselines/
 fn baselines_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".browser-tools")
+        .join(".gsd-browser")
         .join("baselines")
 }
 

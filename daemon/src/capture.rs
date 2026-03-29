@@ -4,7 +4,7 @@
 //! Executes a single JS expression in the page context and deserializes the
 //! result into `CompactPageState`.
 
-use browser_tools_common::types::CompactPageState;
+use gsd_browser_common::types::CompactPageState;
 use chromiumoxide::Page;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;

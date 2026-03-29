@@ -16,7 +16,7 @@ struct BrowserState {
 }
 
 fn state_dir() -> PathBuf {
-    browser_tools_common::state_dir().join("state")
+    gsd_browser_common::state_dir().join("state")
 }
 
 pub async fn handle_save_state(page: &Page, params: &Value) -> Result<Value, String> {

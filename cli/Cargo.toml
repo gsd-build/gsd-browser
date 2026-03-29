@@ -1,22 +1,22 @@
 [package]
-name = "browser-tools"
+name = "gsd-browser"
 version = "0.1.0"
 edition = "2021"
 description = "Browser automation CLI powered by Chrome DevTools Protocol"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/anthropics/browser-tools"
-homepage = "https://github.com/anthropics/browser-tools"
+repository = "https://github.com/anthropics/gsd-browser"
+homepage = "https://github.com/anthropics/gsd-browser"
 keywords = ["browser", "automation", "cdp", "chrome", "testing"]
 categories = ["command-line-utilities", "development-tools::testing", "web-programming"]
 readme = "../README.md"
 
 [[bin]]
-name = "browser-tools"
+name = "gsd-browser"
 path = "src/main.rs"
 
 [dependencies]
 base64 = "0.22"
-browser-tools-common = { path = "../common" }
+gsd-browser-common = { path = "../common" }
 clap = { workspace = true }
 libc = { workspace = true }
 nix = { workspace = true }
