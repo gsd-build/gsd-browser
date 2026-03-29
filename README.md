@@ -37,7 +37,7 @@ Download from [GitHub Releases](https://github.com/anthropics/browser-tools/rele
 browser-tools navigate https://example.com
 
 # Take a screenshot
-browser-tools screenshot --path page.png
+browser-tools screenshot --output page.png --format png
 
 # Get the accessibility tree
 browser-tools accessibility-tree
@@ -72,7 +72,7 @@ browser-tools extract --schema '{"title": {"_selector": "h1"}}'
 | **Auth Vault** | `vault-save`, `vault-login`, `vault-list` |
 | **Test & Tracing** | `generate-test`, `action-cache`, `check-injection`, `har-export`, `trace-start`, `trace-stop` |
 | **Pages & Frames** | `list-pages`, `switch-page`, `close-page`, `list-frames`, `select-frame` |
-| **Daemon** | `daemon start`, `daemon stop`, `daemon status`, `daemon health` |
+| **Daemon** | `daemon start`, `daemon stop`, `daemon health` |
 
 ### Key Differentiators
 
