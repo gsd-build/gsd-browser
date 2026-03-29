@@ -14,6 +14,13 @@ allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 
 # Browser Automation with gsd-browser
 
+## Critical Rules
+
+1. **The daemon auto-starts.** Never run `gsd-browser daemon start` — it starts on first command. Only use `daemon stop` to clean up.
+2. **Always re-snapshot after page changes.** Refs are versioned (`@v1:e1`). After navigation, form submission, or dynamic content loading, old refs are stale. Run `gsd-browser snapshot` to get fresh refs.
+3. **Use `--json` when parsing output.** Use text mode when reading output yourself. Use `--json` when you need to extract values programmatically (e.g., checking assertion results, parsing snapshot refs).
+4. **Positional args have no flag prefix.** Commands like `click`, `type`, `hover` take positional args — do NOT add `--selector`. See exact syntax in command reference below.
+
 ## Core Workflow
 
 Every browser automation follows this pattern:
@@ -32,12 +39,12 @@ gsd-browser fill-ref @v1:e1 "user@example.com"
 gsd-browser fill-ref @v1:e2 "password123"
 gsd-browser click-ref @v1:e3
 gsd-browser wait-for --condition network_idle
-gsd-browser snapshot  # Fresh refs after navigation
+gsd-browser snapshot  # REQUIRED — old refs are now stale
 ```
 
 ## Command Chaining
 
-Commands can be chained with `&&` in a single shell invocation. The browser persists between commands via a background daemon, so chaining is safe and efficient.
+Commands can be chained with `&&` in a single shell invocation. The browser persists between commands via a background daemon.
 
 ```bash
 # Chain navigate + wait + snapshot
@@ -45,9 +52,6 @@ gsd-browser navigate https://example.com && gsd-browser wait-for --condition net
 
 # Chain multiple interactions
 gsd-browser fill-ref @v1:e1 "user@example.com" && gsd-browser fill-ref @v1:e2 "password123" && gsd-browser click-ref @v1:e3
-
-# Navigate and capture
-gsd-browser navigate https://example.com && gsd-browser wait-for --condition network_idle && gsd-browser screenshot --output page.png
 ```
 
 **When to chain:** Use `&&` when you don't need intermediate output. Run commands separately when you need to parse output first (e.g., snapshot to discover refs, then interact).
@@ -56,64 +60,86 @@ gsd-browser navigate https://example.com && gsd-browser wait-for --condition net
 
 ## Command Reference
 
+Argument syntax: `<arg>` = required positional, `[arg]` = optional positional, `--flag` = named option. Do NOT add `--` prefix to positional args.
+
 ### Navigation
 
 ```bash
-gsd-browser navigate <url>                      # Navigate to a URL (--screenshot to capture)
-gsd-browser back                                 # Go back in browser history
-gsd-browser forward                              # Go forward in browser history
-gsd-browser reload                               # Reload the current page
+gsd-browser navigate <url>                        # Navigate to a URL
+gsd-browser back                                   # Go back in browser history
+gsd-browser forward                                # Go forward in browser history
+gsd-browser reload                                 # Reload the current page
 ```
 
-### Interaction (CSS selectors)
+### Interaction
+
+All selectors are **positional** — do NOT use `--selector`.
 
 ```bash
-gsd-browser click <selector>                     # Click by CSS selector
-gsd-browser click --x 100 --y 200                # Click by coordinates
-gsd-browser type <selector> <text>               # Type into input (atomic fill)
-gsd-browser type <selector> <text> --slowly       # Type character-by-character
-gsd-browser type <selector> <text> --clear-first  # Clear field first
-gsd-browser type <selector> <text> --submit       # Press Enter after typing
-gsd-browser press <key>                           # Press key (Enter, Escape, Tab, Meta+A)
-gsd-browser hover <selector>                      # Hover over element
-gsd-browser scroll --direction down               # Scroll down 300px (default)
-gsd-browser scroll --direction up --amount 500    # Scroll up 500px
-gsd-browser select-option <selector> <option>     # Select dropdown option by label/value
-gsd-browser set-checked <selector> true           # Check/uncheck checkbox or radio
-gsd-browser drag <source> <target>                # Drag-and-drop between elements
-gsd-browser upload-file <selector> <file>...      # Set files on <input type="file">
-gsd-browser set-viewport --preset mobile          # Preset: mobile, tablet, desktop, wide
+# Click
+gsd-browser click <selector>                       # Click by CSS selector
+gsd-browser click --x 100 --y 200                  # Click by coordinates (no selector)
+
+# Type — positional: <selector> <text>
+gsd-browser type <selector> <text>                 # Atomic fill (replaces content)
+gsd-browser type <selector> <text> --slowly        # Character-by-character
+gsd-browser type <selector> <text> --clear-first   # Clear field before typing
+gsd-browser type <selector> <text> --submit        # Press Enter after typing
+
+# Other interaction — all positional selectors
+gsd-browser press <key>                            # Press key: Enter, Escape, Tab, Meta+A
+gsd-browser hover <selector>                       # Hover over element
+gsd-browser scroll --direction down                # Scroll down 300px (default)
+gsd-browser scroll --direction up --amount 500     # Scroll up 500px
+gsd-browser select-option <selector> <option>      # Select dropdown by label or value
+gsd-browser set-checked <selector> --checked       # Check checkbox/radio (omit --checked to uncheck)
+gsd-browser drag <source-selector> <target-selector>  # Drag-and-drop
+gsd-browser upload-file <selector> <file>...       # Set files on <input type="file">
+gsd-browser set-viewport --preset mobile           # Preset: mobile, tablet, desktop, wide
 gsd-browser set-viewport --width 1920 --height 1080  # Custom dimensions
 ```
 
 ### Snapshot & Refs
 
-Refs are versioned (`@v1:e1`, `@v2:e3`) and invalidated when the page changes. Always re-snapshot after navigation, form submission, or dynamic content loading.
+Refs are versioned (`@v1:e1`, `@v2:e3`). The version increments each snapshot. **Old refs become stale after page changes — always re-snapshot.**
 
 ```bash
-gsd-browser snapshot                              # Snapshot interactive elements, assign refs
-gsd-browser snapshot --selector "form"            # Scope to a CSS selector
-gsd-browser snapshot --mode form                  # Semantic mode: form, dialog, navigation, errors, headings
-gsd-browser snapshot --limit 80                   # Increase element limit (default: 40)
-gsd-browser snapshot --interactive-only            # Only interactive elements (default: true)
+# Take snapshot
+gsd-browser snapshot                               # Snapshot interactive elements, assign refs
+gsd-browser snapshot --selector "form"             # Scope to a CSS selector
+gsd-browser snapshot --mode <mode>                 # Semantic mode (see below)
+gsd-browser snapshot --limit 80                    # Increase element limit (default: 40)
 
-gsd-browser get-ref @v1:e1                        # Get metadata for a specific ref
-gsd-browser click-ref @v1:e3                      # Click element by ref
-gsd-browser hover-ref @v1:e2                      # Hover element by ref
-gsd-browser fill-ref @v1:e1 "text"                # Type into element by ref
+# Use refs — all positional
+gsd-browser get-ref <ref>                          # Get metadata for a ref
+gsd-browser click-ref <ref>                        # Click element by ref
+gsd-browser hover-ref <ref>                        # Hover element by ref
+gsd-browser fill-ref <ref> <text>                  # Type into element by ref
 ```
+
+**Snapshot modes** (`--mode`):
+
+| Mode | What it captures |
+|------|-----------------|
+| `interactive` | Buttons, inputs, links, selects (default) |
+| `form` | Form fields with labels and current values |
+| `dialog` | Elements inside open dialogs/modals |
+| `navigation` | Links and nav elements |
+| `errors` | Error messages, validation warnings |
+| `headings` | Heading elements (h1-h6) for page structure |
+| `visible_only` | All visible elements regardless of interactivity |
 
 ### Inspection
 
 ```bash
-gsd-browser accessibility-tree                    # Full accessibility tree (roles, names, states)
-gsd-browser find --text "Sign In"                 # Find elements by text (case-insensitive contains)
-gsd-browser find --role button                    # Find by ARIA role
-gsd-browser find --selector ".my-class"           # Find by CSS selector
-gsd-browser find --role link --limit 50           # Increase limit (default: 20)
-gsd-browser page-source                           # Get raw HTML of page
-gsd-browser page-source --selector "main"         # Scoped HTML source
-gsd-browser eval 'document.title'                 # Evaluate JavaScript in page context
+gsd-browser accessibility-tree                     # Full accessibility tree (roles, names, states)
+gsd-browser find --text "Sign In"                  # Find elements by text (case-insensitive)
+gsd-browser find --role button                     # Find by ARIA role
+gsd-browser find --selector ".my-class"            # Find by CSS selector
+gsd-browser find --role link --limit 50            # Increase limit (default: 20)
+gsd-browser page-source                            # Get raw HTML of page
+gsd-browser page-source --selector "main"          # Scoped HTML source
+gsd-browser eval '<js-expression>'                 # Evaluate JavaScript in page context
 ```
 
 ### Assertions
@@ -181,7 +207,7 @@ Analyze forms and fill them by field label, name, placeholder, or aria-label —
 gsd-browser analyze-form
 gsd-browser analyze-form --selector "#signup-form"
 
-# Fill by field identifiers (resolved: label → name → placeholder → aria-label)
+# Fill by field identifiers (resolved: label -> name -> placeholder -> aria-label)
 gsd-browser fill-form --values '{"Email": "a@b.com", "Password": "secret", "Country": "US"}'
 gsd-browser fill-form --values '{"Email": "a@b.com"}' --submit  # Fill and click submit
 gsd-browser fill-form --values '{"Email": "a@b.com"}' --selector "#login-form"
@@ -189,19 +215,17 @@ gsd-browser fill-form --values '{"Email": "a@b.com"}' --selector "#login-form"
 
 ### Intent-Based Interaction
 
-Find and act on elements by semantic intent — no selectors or refs needed.
+Find and act on elements by semantic intent — no selectors or refs needed. Intents are predefined categories, not free-form text.
 
 ```bash
 # Find top candidates for an intent (returns scored matches with selectors)
 gsd-browser find-best --intent submit_form
-gsd-browser find-best --intent close_dialog
-gsd-browser find-best --intent primary_cta --scope "#modal"
 gsd-browser find-best --intent accept_cookies
+gsd-browser find-best --intent primary_cta --scope "#modal"
 
 # Act: find best match and click/focus it in one call
 gsd-browser act --intent submit_form
-gsd-browser act --intent close_dialog
-gsd-browser act --intent search_field
+gsd-browser act --intent accept_cookies
 gsd-browser act --intent fill_email
 ```
 
@@ -221,50 +245,54 @@ gsd-browser act --intent fill_email
 | `fill_password` | focus | Password input fields |
 | `fill_username` | focus | Username/login input fields |
 | `accept_cookies` | click | Cookie consent accept buttons |
-| `main_content` | click | Main content area (`<main>`, `<article>`) |
+| `main_content` | click | Main content area (`<main>`, `<article>`, semantic markup required) |
 | `pagination_next` | click | Next page in pagination |
 | `pagination_prev` | click | Previous page in pagination |
 
 ### Pages & Frames
 
-```bash
-gsd-browser list-pages                            # List all open tabs
-gsd-browser switch-page --id 2                    # Switch to tab by ID
-gsd-browser close-page --id 3                     # Close a tab
+Page and frame IDs are **positional** — do NOT use `--id`.
 
-gsd-browser list-frames                           # List all frames (main + iframes)
-gsd-browser select-frame --name "iframe-name"     # Select frame by name
-gsd-browser select-frame --url-pattern "embed"    # Select frame by URL substring
-gsd-browser select-frame --index 0                # Select by index
-gsd-browser select-frame --name main              # Return to main frame
+```bash
+gsd-browser list-pages                             # List all open tabs
+gsd-browser switch-page <id>                       # Switch to tab by ID (positional)
+gsd-browser close-page <id>                        # Close a tab by ID (positional)
+
+gsd-browser list-frames                            # List all frames (main + iframes)
+gsd-browser select-frame --name "iframe-name"      # Select frame by name
+gsd-browser select-frame --url-pattern "embed"     # Select frame by URL substring
+gsd-browser select-frame --index 0                 # Select by index
+gsd-browser select-frame --name main               # Return to main frame
 ```
 
 ### Diagnostics
 
 ```bash
-gsd-browser console                               # Get console log entries
-gsd-browser network                               # Get network log entries
-gsd-browser dialog                                # Get dialog events (alert, confirm, prompt)
-gsd-browser timeline                              # Query the action timeline
-gsd-browser session-summary                       # Diagnostic summary of current session
-gsd-browser debug-bundle                          # Full debug bundle: screenshot + logs + timeline + a11y tree
+gsd-browser console                                # Get console log entries (clears buffer)
+gsd-browser console --no-clear                     # Read without clearing
+gsd-browser network                                # Get network log entries
+gsd-browser dialog                                 # Get dialog events (alert, confirm, prompt)
+gsd-browser timeline                               # Query the action timeline
+gsd-browser session-summary                        # Diagnostic summary of current session
+gsd-browser debug-bundle                           # Full debug bundle: screenshot + logs + timeline + a11y tree
 ```
 
 ### Visual
 
 ```bash
-gsd-browser screenshot                            # Screenshot to stdout (JPEG)
-gsd-browser screenshot --output page.png          # Write to file
-gsd-browser screenshot --full-page                # Full scrollable page
-gsd-browser screenshot --selector "#hero"         # Crop to element (PNG)
-gsd-browser screenshot --quality 50               # JPEG quality 1-100 (default: 80)
-gsd-browser screenshot --format png               # Force PNG format
+gsd-browser screenshot                             # Screenshot to stdout (JPEG base64)
+gsd-browser screenshot --output page.png           # Write to file
+gsd-browser screenshot --format png                # Force PNG format
+gsd-browser screenshot --full-page                 # Full scrollable page
+gsd-browser screenshot --selector "#hero"          # Crop to element (always PNG)
+gsd-browser screenshot --quality 50                # JPEG quality 1-100 (default: 80)
 
 gsd-browser zoom-region --x 100 --y 200 --width 400 --height 300  # Capture region
-gsd-browser zoom-region --x 0 --y 0 --width 200 --height 200 --scale 3  # Upscale for detail
+gsd-browser zoom-region --x 0 --y 0 --width 200 --height 200 --scale 3  # Upscale
 
-gsd-browser save-pdf                              # Save page as PDF
-gsd-browser save-pdf --output report.pdf          # Custom output path
+gsd-browser save-pdf                               # Save page as PDF (A4 default)
+gsd-browser save-pdf --output report.pdf           # Custom output path
+gsd-browser save-pdf --format Letter               # Page format: A4, Letter, Legal, Tabloid
 ```
 
 ### Visual Regression
@@ -275,14 +303,12 @@ gsd-browser visual-diff --name "homepage"
 
 # Subsequent runs: compare against baseline, report mismatch
 gsd-browser visual-diff --name "homepage"
-gsd-browser visual-diff --name "homepage" --threshold 0.05   # Stricter tolerance
+gsd-browser visual-diff --name "homepage" --threshold 0.05   # Stricter tolerance (0-1)
 gsd-browser visual-diff --selector "#hero" --name "hero"     # Scope to element
-gsd-browser visual-diff --name "homepage" --update-baseline   # Reset baseline
+gsd-browser visual-diff --name "homepage" --update-baseline  # Reset baseline
 ```
 
 ### Structured Data Extraction
-
-Extract data from pages using CSS selectors with JSON Schema validation.
 
 ```bash
 # Single item
@@ -295,7 +321,7 @@ gsd-browser extract --schema '{
   }
 }'
 
-# Array of items (container mode)
+# Array of items
 gsd-browser extract --selector ".product-card" --multiple --schema '{
   "type": "object",
   "properties": {
@@ -308,29 +334,23 @@ gsd-browser extract --selector ".product-card" --multiple --schema '{
 ### Network Mocking
 
 ```bash
-# Mock API response
 gsd-browser mock-route --url "**/api/users*" --body '[{"name":"Alice"}]' --status 200
-
-# Simulate slow responses
-gsd-browser mock-route --url "**/api/data" --body '{"ok":true}' --delay 3000
-
-# Block URLs (analytics, ads)
-gsd-browser block-urls "**/analytics*" "**/ads*"
-
-# Remove all mocks and blocks
-gsd-browser clear-routes
+gsd-browser mock-route --url "**/api/data" --body '{"ok":true}' --delay 3000  # Slow response
+gsd-browser block-urls "**/analytics*" "**/ads*"   # Block URL patterns (positional)
+gsd-browser clear-routes                           # Remove all mocks and blocks
 ```
 
 ### Device Emulation
 
 ```bash
-gsd-browser emulate-device "iPhone 15"            # Full device emulation
-gsd-browser emulate-device "Pixel 7"              # Android device
-gsd-browser emulate-device "iPad Pro 11"           # Tablet
+gsd-browser emulate-device <device-name>           # Full device emulation (positional)
+gsd-browser emulate-device "iPhone 15"
+gsd-browser emulate-device "Pixel 7"
+gsd-browser emulate-device "iPad Pro 11"
 gsd-browser emulate-device list                    # Show all available presets
 ```
 
-**Note:** Device emulation recreates the browser context — current page state is lost.
+**Warning:** Device emulation recreates the browser context — current page state and cookies are lost.
 
 ### State & Auth
 
@@ -346,7 +366,7 @@ gsd-browser vault-login --profile github
 gsd-browser vault-list                             # List profiles (no secrets shown)
 ```
 
-Vault encryption uses `GSD_BROWSER_VAULT_KEY` env var.
+Vault encryption requires `GSD_BROWSER_VAULT_KEY` env var set **before the daemon starts**. If the daemon is already running, stop it first, set the var, then run your vault command.
 
 ### Tracing & Recording
 
@@ -366,14 +386,13 @@ gsd-browser generate-test --name "login-flow" --output tests/login.spec.ts
 ### Security
 
 ```bash
-# Scan for prompt injection in page content
-gsd-browser check-injection
+gsd-browser check-injection                        # Scan for prompt injection in page content
 gsd-browser check-injection --include-hidden       # Include hidden/invisible text (default: true)
 ```
 
 ### Action Cache
 
-Reduce token cost on repeat visits by caching page-structure → selector mappings.
+Reduce repeated element lookups by caching intent-to-selector mappings.
 
 ```bash
 gsd-browser action-cache --action stats            # Show cache metrics
@@ -384,12 +403,12 @@ gsd-browser action-cache --action clear            # Flush cache
 
 ### Daemon Management
 
-The daemon auto-starts on first command. Manual control:
+The daemon auto-starts on first command. You almost never need these.
 
 ```bash
-gsd-browser daemon start                           # Start daemon explicitly
-gsd-browser daemon stop                            # Stop daemon
-gsd-browser daemon health                          # Health check
+gsd-browser daemon stop                            # Stop daemon (clean up when done)
+gsd-browser daemon health                          # Health check (returns PID)
+gsd-browser daemon start                           # Explicit start (rarely needed)
 ```
 
 ---
@@ -400,24 +419,190 @@ Available on all commands:
 
 | Flag | Description |
 |------|-------------|
-| `--json` | Output as JSON (machine-readable) |
+| `--json` | Output as JSON (use when parsing output programmatically) |
 | `--browser-path <path>` | Path to Chrome/Chromium binary |
-| `--session <name>` | Named session for parallel instances |
+| `--session <name>` | Named session for parallel browser instances |
 
 ---
 
-## Ref Lifecycle (Important)
+## Error Recovery
 
-Refs use versioned format: `@v1:e1`, `@v1:e2`, `@v2:e1`, etc. The version increments each time you snapshot. Refs are **invalidated** when the page changes. Always re-snapshot after:
+### Stale refs
 
-- Clicking links or buttons that navigate
-- Form submissions
-- Dynamic content loading (dropdowns, modals, AJAX)
+```
+Error: resolve_ref: JS evaluation failed: ref @v1:e3 not found
+```
+
+Refs become stale after page changes. Fix: re-snapshot and use the new version.
 
 ```bash
-gsd-browser click-ref @v1:e5           # Navigates to new page
-gsd-browser snapshot                    # MUST re-snapshot — old refs are stale
-gsd-browser click-ref @v2:e1           # Use new refs (version incremented)
+gsd-browser snapshot        # Get fresh refs (@v2:eN)
+gsd-browser click-ref @v2:e1
+```
+
+### Click/type timeouts
+
+```
+Error: click timed out after 10s for: #submit-btn
+```
+
+The element may not be visible, may be behind an overlay, or may not exist. Try:
+
+```bash
+gsd-browser find --selector "#submit-btn"          # Verify element exists
+gsd-browser scroll --direction down                # Scroll it into view
+gsd-browser wait-for --condition selector_visible --value "#submit-btn"  # Wait for it
+gsd-browser click "#submit-btn"                    # Retry
+```
+
+### Empty console/network logs
+
+Console and network buffers start fresh each navigation. If you need logs from a specific action, check them **before** navigating away:
+
+```bash
+gsd-browser navigate https://example.com
+gsd-browser eval "fetch('/api/data')"
+gsd-browser network                                # Check network BEFORE navigating away
+```
+
+### Cookie banners / overlays blocking interaction
+
+Many sites show consent banners that block clicks. Dismiss them first:
+
+```bash
+gsd-browser act --intent accept_cookies            # Auto-find and click accept button
+gsd-browser act --intent dismiss                   # Or dismiss generic overlays
+```
+
+### Daemon won't start
+
+```
+Error: daemon did not start within 10s
+```
+
+Usually a stale Chrome lock file. Fix:
+
+```bash
+gsd-browser daemon stop                            # Stop any existing daemon
+rm -f /tmp/chromiumoxide-runner/SingletonLock       # Remove stale lock
+gsd-browser daemon health                          # Retry (auto-starts)
+```
+
+---
+
+## Common Patterns
+
+### Form Submission
+
+```bash
+gsd-browser navigate https://example.com/signup
+gsd-browser analyze-form                           # Discover field labels and types
+gsd-browser fill-form --values '{"Full Name": "Jane Doe", "Email": "jane@example.com", "State": "California"}' --submit
+gsd-browser wait-for --condition network_idle
+gsd-browser assert --checks '[{"kind": "text_visible", "text": "Welcome"}]'
+```
+
+### Login Flow (Refs)
+
+```bash
+gsd-browser navigate https://app.example.com/login
+gsd-browser act --intent accept_cookies            # Dismiss cookie banner if present
+gsd-browser snapshot
+# Read snapshot output to find email, password, and submit refs
+gsd-browser fill-ref @v1:e1 "$USERNAME"
+gsd-browser fill-ref @v1:e2 "$PASSWORD"
+gsd-browser click-ref @v1:e3
+gsd-browser wait-for --condition url_contains --value "/dashboard"
+gsd-browser save-state --name "myapp-auth"         # Save for reuse
+```
+
+### Login Flow (Vault)
+
+```bash
+# Save credentials once (encrypted at rest)
+gsd-browser vault-save --profile myapp \
+  --url https://app.example.com/login \
+  --username user@example.com \
+  --password "$PASSWORD"
+
+# Login in any future session
+gsd-browser vault-login --profile myapp
+gsd-browser wait-for --condition url_contains --value "/dashboard"
+```
+
+### Reuse Saved Auth
+
+```bash
+gsd-browser restore-state --name "myapp-auth"
+gsd-browser navigate https://app.example.com/dashboard  # Already logged in
+```
+
+### Data Scraping
+
+```bash
+gsd-browser navigate https://example.com/products
+gsd-browser extract --selector ".product" --multiple --schema '{
+  "type": "object",
+  "properties": {
+    "name": {"_selector": ".title", "_attribute": "textContent"},
+    "price": {"_selector": ".price", "_attribute": "textContent"},
+    "link": {"_selector": "a", "_attribute": "href"}
+  }
+}'
+```
+
+### Visual Regression Testing
+
+```bash
+# Establish baseline (first run)
+gsd-browser navigate https://example.com
+gsd-browser visual-diff --name "home-page"
+
+# Later: compare current state
+gsd-browser navigate https://example.com
+gsd-browser visual-diff --name "home-page"
+# Output: similarity %, diff pixel count, diff image path
+```
+
+### Network Mocking for Testing
+
+```bash
+gsd-browser mock-route --url "**/api/users" --body '{"error":"server error"}' --status 500
+gsd-browser navigate https://app.example.com
+gsd-browser assert --checks '[{"kind": "text_visible", "text": "Something went wrong"}]'
+gsd-browser clear-routes                           # Clean up mocks
+```
+
+### Parallel Sessions
+
+```bash
+gsd-browser --session site1 navigate https://site-a.com
+gsd-browser --session site2 navigate https://site-b.com
+
+gsd-browser --session site1 snapshot
+gsd-browser --session site2 snapshot
+
+# Clean up both
+gsd-browser --session site1 daemon stop
+gsd-browser --session site2 daemon stop
+```
+
+### Performance Audit
+
+```bash
+gsd-browser navigate https://example.com
+gsd-browser trace-start --name "perf-audit"
+# ... interact with the page ...
+gsd-browser trace-stop --name "perf-audit.json"
+gsd-browser har-export --filename "network.har"
+```
+
+### Prompt Injection Scanning
+
+```bash
+gsd-browser navigate https://untrusted-page.com
+gsd-browser check-injection
+# Returns severity-rated findings for visible and hidden injection patterns
 ```
 
 ---
@@ -426,7 +611,7 @@ gsd-browser click-ref @v2:e1           # Use new refs (version incremented)
 
 ### Config Files (TOML)
 
-gsd-browser loads config from TOML files with 5-layer merge precedence:
+gsd-browser loads config with 5-layer merge precedence:
 
 1. Compiled defaults
 2. User config: `~/.gsd-browser/config.toml`
@@ -441,7 +626,7 @@ Example `gsd-browser.toml`:
 path = "/usr/bin/chromium"
 
 [daemon]
-port = 9223
+port = 9222
 host = "127.0.0.1"
 
 [screenshot]
@@ -473,158 +658,22 @@ GSD_BROWSER_BROWSER__PATH=/usr/bin/chromium
 GSD_BROWSER_DAEMON__PORT=9223
 GSD_BROWSER_SCREENSHOT__QUALITY=90
 GSD_BROWSER_SETTLE__TIMEOUT_MS=1000
-GSD_BROWSER_LOGS__MAX_BUFFER_SIZE=2000
-GSD_BROWSER_ARTIFACTS__DIR=./artifacts
 GSD_BROWSER_VAULT_KEY=your-encryption-key
 ```
 
 ---
 
-## Common Patterns
+## Session Cleanup
 
-### Form Submission
+Always stop the daemon when done to avoid leaked Chrome processes:
 
 ```bash
-gsd-browser navigate https://example.com/signup
-gsd-browser analyze-form                          # Discover field labels
-gsd-browser fill-form --values '{"Full Name": "Jane Doe", "Email": "jane@example.com", "State": "California"}' --submit
-gsd-browser wait-for --condition network_idle
-gsd-browser assert --checks '[{"kind": "text_visible", "text": "Welcome"}]'
+gsd-browser daemon stop
 ```
 
-### Auth Flow (Vault)
+For parallel sessions:
 
 ```bash
-# Save credentials once (encrypted at rest)
-gsd-browser vault-save --profile myapp \
-  --url https://app.example.com/login \
-  --username user@example.com \
-  --password "$PASSWORD"
-
-# Login in any future session
-gsd-browser vault-login --profile myapp
-gsd-browser wait-for --condition url_contains --value "/dashboard"
-```
-
-### Auth Flow (State Persistence)
-
-```bash
-# Login and save state
-gsd-browser navigate https://app.example.com/login
-gsd-browser snapshot
-gsd-browser fill-ref @v1:e1 "$USERNAME" && gsd-browser fill-ref @v1:e2 "$PASSWORD"
-gsd-browser click-ref @v1:e3
-gsd-browser wait-for --condition url_contains --value "/dashboard"
-gsd-browser save-state --name "myapp-auth"
-
-# Reuse in future sessions
-gsd-browser restore-state --name "myapp-auth"
-gsd-browser navigate https://app.example.com/dashboard
-```
-
-### Data Extraction
-
-```bash
-gsd-browser navigate https://example.com/products
-gsd-browser extract --selector ".product" --multiple --schema '{
-  "type": "object",
-  "properties": {
-    "name": {"_selector": ".title", "_attribute": "textContent"},
-    "price": {"_selector": ".price", "_attribute": "textContent"},
-    "link": {"_selector": "a", "_attribute": "href"}
-  }
-}'
-```
-
-### Visual Regression Testing
-
-```bash
-# Establish baseline
-gsd-browser navigate https://example.com
-gsd-browser visual-diff --name "home-page"
-
-# Later: compare current state
-gsd-browser navigate https://example.com
-gsd-browser visual-diff --name "home-page"
-# Output: similarity score, diff pixel count, pass/fail
-```
-
-### Network Mocking for Testing
-
-```bash
-# Mock API to test error handling
-gsd-browser mock-route --url "**/api/users" --body '{"error":"server error"}' --status 500
-gsd-browser navigate https://app.example.com
-gsd-browser assert --checks '[{"kind": "text_visible", "text": "Something went wrong"}]'
-gsd-browser clear-routes
-```
-
-### Multi-Tab Workflows
-
-```bash
-gsd-browser navigate https://site-a.com
-gsd-browser list-pages
-# Switch between tabs
-gsd-browser switch-page --id 2
-gsd-browser snapshot
-gsd-browser switch-page --id 1
-```
-
-### Parallel Sessions
-
-```bash
-gsd-browser --session site1 navigate https://site-a.com
-gsd-browser --session site2 navigate https://site-b.com
-
-gsd-browser --session site1 snapshot
-gsd-browser --session site2 snapshot
-```
-
-### Performance Tracing
-
-```bash
-gsd-browser navigate https://example.com
-gsd-browser trace-start --name "perf-audit"
-# ... interact with the page ...
-gsd-browser trace-stop --name "perf-audit.json"
-gsd-browser har-export --filename "network.har"
-```
-
-### Prompt Injection Scanning
-
-```bash
-gsd-browser navigate https://untrusted-page.com
-gsd-browser check-injection
-# Returns findings with severity levels for any injection attempts
-```
-
----
-
-## Session Management
-
-Always close sessions when done to avoid leaked processes:
-
-```bash
-gsd-browser daemon stop                            # Stop default session daemon
-```
-
-For parallel sessions, use `--session` to isolate:
-
-```bash
-gsd-browser --session agent1 navigate https://site-a.com
-gsd-browser --session agent2 navigate https://site-b.com
 gsd-browser --session agent1 daemon stop
 gsd-browser --session agent2 daemon stop
 ```
-
-## JSON Output
-
-All commands support `--json` for machine-readable output:
-
-```bash
-gsd-browser snapshot --json
-gsd-browser find --role button --json
-gsd-browser assert --checks '[...]' --json
-```
-
-Use JSON output when you need to parse results programmatically.
