@@ -1,7 +1,7 @@
 //! Playwright test code generation from the action timeline.
 
 use crate::state::DaemonState;
-use browser_tools_common::state_dir;
+use gsd_browser_common::state_dir;
 use serde_json::{json, Value};
 use std::fs;
 

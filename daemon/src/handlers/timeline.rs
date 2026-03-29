@@ -23,7 +23,7 @@ pub fn handle_timeline(state: &DaemonState, params: &Value) -> Result<Value, Str
 
     if write_to_disk {
         if let Ok(json_str) = serde_json::to_string_pretty(&result) {
-            let path = browser_tools_common::state_dir().join("timeline.json");
+            let path = gsd_browser_common::state_dir().join("timeline.json");
             if let Err(e) = std::fs::write(&path, json_str) {
                 return Err(format!("failed to write timeline to disk: {e}"));
             }

@@ -1,4 +1,4 @@
-# browser-tools
+# gsd-browser
 
 A fast, native browser automation CLI powered by Chrome DevTools Protocol. 63 commands covering navigation, interaction, screenshots, accessibility, network mocking, visual diffing, test generation, and more — all from a single binary.
 
@@ -9,44 +9,44 @@ Built in Rust for speed and reliability. Designed for AI agents, CI pipelines, a
 ### npm (recommended)
 
 ```bash
-npm install -g @gsd-build/browser-tools
+npm install -g @gsd-build/gsd-browser
 ```
 
 ### Cargo (from source)
 
 ```bash
-cargo install browser-tools
+cargo install gsd-browser
 ```
 
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/anthropics/browser-tools/releases) for your platform:
+Download from [GitHub Releases](https://github.com/anthropics/gsd-browser/releases) for your platform:
 
 | Platform | Binary |
 |----------|--------|
-| macOS (Apple Silicon) | `browser-tools-darwin-arm64` |
-| macOS (Intel) | `browser-tools-darwin-x64` |
-| Linux (ARM64) | `browser-tools-linux-arm64` |
-| Linux (x64) | `browser-tools-linux-x64` |
-| Windows (x64) | `browser-tools-win-x64.exe` |
+| macOS (Apple Silicon) | `gsd-browser-darwin-arm64` |
+| macOS (Intel) | `gsd-browser-darwin-x64` |
+| Linux (ARM64) | `gsd-browser-linux-arm64` |
+| Linux (x64) | `gsd-browser-linux-x64` |
+| Windows (x64) | `gsd-browser-win-x64.exe` |
 
 ## Quick Start
 
 ```bash
 # Navigate to a page
-browser-tools navigate https://example.com
+gsd-browser navigate https://example.com
 
 # Take a screenshot
-browser-tools screenshot --output page.png --format png
+gsd-browser screenshot --output page.png --format png
 
 # Get the accessibility tree
-browser-tools accessibility-tree
+gsd-browser accessibility-tree
 
 # Click a button by CSS selector
-browser-tools click --selector "button.submit"
+gsd-browser click --selector "button.submit"
 
 # Extract structured data
-browser-tools extract --schema '{"title": {"_selector": "h1"}}'
+gsd-browser extract --schema '{"title": {"_selector": "h1"}}'
 ```
 
 ## Features
@@ -88,15 +88,15 @@ browser-tools extract --schema '{"title": {"_selector": "h1"}}'
 
 ## Configuration
 
-browser-tools uses a 5-layer configuration merge:
+gsd-browser uses a 5-layer configuration merge:
 
 1. **Built-in defaults** — sensible values for all settings
-2. **User config** — `~/.browser-tools/config.toml`
-3. **Project config** — `./browser-tools.toml` in your project root
-4. **Environment variables** — `BROWSER_TOOLS_*` prefix
+2. **User config** — `~/.gsd-browser/config.toml`
+3. **Project config** — `./gsd-browser.toml` in your project root
+4. **Environment variables** — `GSD_BROWSER_*` prefix
 5. **CLI flags** — highest priority, override everything
 
-Example `browser-tools.toml`:
+Example `gsd-browser.toml`:
 
 ```toml
 [browser]
@@ -120,8 +120,8 @@ quiet_window_ms = 100
 Environment variable override example:
 
 ```bash
-export BROWSER_TOOLS_BROWSER_PATH=/usr/bin/chromium
-export BROWSER_TOOLS_DAEMON_PORT=9333
+export GSD_BROWSER_BROWSER_PATH=/usr/bin/chromium
+export GSD_BROWSER_DAEMON_PORT=9333
 ```
 
 ## Architecture
@@ -147,16 +147,16 @@ The **CLI** parses commands and delegates to the **daemon** process over a local
 Every command supports `--json` for structured output:
 
 ```bash
-browser-tools navigate https://example.com --json
+gsd-browser navigate https://example.com --json
 # {"title":"Example Domain","url":"https://example.com/","status":"ok"}
 
-browser-tools find --text "More information" --json
+gsd-browser find --text "More information" --json
 # {"elements":[{"role":"link","name":"More information...","selector":"a"}]}
 ```
 
 ## For AI Agents
 
-browser-tools ships with `SKILL.md` and `AGENTS.md` for automatic agent discovery. Agents can:
+gsd-browser ships with `SKILL.md` and `AGENTS.md` for automatic agent discovery. Agents can:
 
 1. Read `SKILL.md` for complete command reference and workflow patterns
 2. Use `--json` output for structured data parsing

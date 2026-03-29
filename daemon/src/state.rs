@@ -1,7 +1,7 @@
 //! Daemon-side state management for action timeline, versioned refs, diff snapshots,
 //! page registry, and frame selection.
 
-use browser_tools_common::types::{ActionEntry, CompactPageState};
+use gsd_browser_common::types::{ActionEntry, CompactPageState};
 use chromiumoxide::Page;
 use serde_json::Value;
 use std::collections::{HashMap, VecDeque};

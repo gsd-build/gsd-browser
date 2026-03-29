@@ -97,11 +97,11 @@ impl DaemonResponse {
 
 // ── Paths ──
 
-/// Returns the directory for browser-tools state files (~/.browser-tools)
+/// Returns the directory for gsd-browser state files (~/.gsd-browser)
 pub fn state_dir() -> std::path::PathBuf {
     dirs::home_dir()
         .expect("could not determine home directory")
-        .join(".browser-tools")
+        .join(".gsd-browser")
 }
 
 pub fn socket_path() -> std::path::PathBuf {
@@ -117,7 +117,7 @@ pub fn lock_path() -> std::path::PathBuf {
 }
 
 /// Session-aware socket path. When session is Some, uses
-/// `~/.browser-tools/sessions/<name>/daemon.sock`.
+/// `~/.gsd-browser/sessions/<name>/daemon.sock`.
 pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
     match session {
         Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
@@ -126,7 +126,7 @@ pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
 }
 
 /// Session-aware PID path. When session is Some, uses
-/// `~/.browser-tools/sessions/<name>/daemon.pid`.
+/// `~/.gsd-browser/sessions/<name>/daemon.pid`.
 pub fn pid_path_for(session: Option<&str>) -> std::path::PathBuf {
     match session {
         Some(name) => state_dir().join("sessions").join(name).join("daemon.pid"),

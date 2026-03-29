@@ -13,7 +13,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 echo "=== Building workspace ==="
 cargo build --workspace --manifest-path "$PROJECT_DIR/Cargo.toml" 2>&1 | tail -1
 
-BIN="$PROJECT_DIR/target/debug/browser-tools"
+BIN="$PROJECT_DIR/target/debug/gsd-browser"
 PASS=0
 FAIL=0
 TOTAL=0
@@ -32,17 +32,17 @@ check() {
 }
 
 cleanup_daemon() {
-    if [ -f ~/.browser-tools/daemon.pid ]; then
+    if [ -f ~/.gsd-browser/daemon.pid ]; then
         local pid
-        pid=$(cat ~/.browser-tools/daemon.pid 2>/dev/null)
+        pid=$(cat ~/.gsd-browser/daemon.pid 2>/dev/null)
         if [ -n "$pid" ]; then
             kill "$pid" 2>/dev/null || true
         fi
     fi
-    pkill -f "browser-tools-daemon" 2>/dev/null || true
+    pkill -f "gsd-browser-daemon" 2>/dev/null || true
     sleep 2
     find /private/var/folders -name "SingletonLock" -path "*/chromiumoxide-runner/*" -delete 2>/dev/null || true
-    rm -f ~/.browser-tools/daemon.sock ~/.browser-tools/daemon.pid
+    rm -f ~/.gsd-browser/daemon.sock ~/.gsd-browser/daemon.pid
 }
 
 # ════════════════════════════════════════════
@@ -92,8 +92,8 @@ echo "=== npm Package Structure ==="
 test -f "$PROJECT_DIR/npm/package.json"
 check "npm/package.json exists" $?
 
-node -e "const p=require('$PROJECT_DIR/npm/package.json'); if(p.name !== '@gsd-build/browser-tools') process.exit(1)" 2>/dev/null
-check "npm package name is @gsd-build/browser-tools" $?
+node -e "const p=require('$PROJECT_DIR/npm/package.json'); if(p.name !== '@gsd-build/gsd-browser') process.exit(1)" 2>/dev/null
+check "npm package name is @gsd-build/gsd-browser" $?
 
 test -f "$PROJECT_DIR/npm/scripts/postinstall.js"
 check "npm/scripts/postinstall.js exists" $?
@@ -130,7 +130,7 @@ check "common/src/config.rs exists" $?
 grep -q "pub mod config" "$PROJECT_DIR/common/src/lib.rs" 2>/dev/null
 check "config module is public in common/src/lib.rs" $?
 
-# Env var override: set BROWSER_TOOLS_SCREENSHOT_QUALITY and verify CLI doesn't error
+# Env var override: set GSD_BROWSER_SCREENSHOT_QUALITY and verify CLI doesn't error
 # (We test that the binary starts cleanly with the env var set)
 TMPDIR_CFG=$(mktemp -d)
 cat > "$TMPDIR_CFG/config.toml" << 'TOMLEOF'
@@ -141,8 +141,8 @@ timeout_ms = 999
 quality = 42
 TOMLEOF
 # The config infrastructure should parse env vars without crashing
-BROWSER_TOOLS_SCREENSHOT_QUALITY=50 "$BIN" --help > /dev/null 2>&1
-check "CLI starts cleanly with BROWSER_TOOLS_SCREENSHOT_QUALITY env var" $?
+GSD_BROWSER_SCREENSHOT_QUALITY=50 "$BIN" --help > /dev/null 2>&1
+check "CLI starts cleanly with GSD_BROWSER_SCREENSHOT_QUALITY env var" $?
 
 rm -rf "$TMPDIR_CFG"
 
@@ -210,7 +210,7 @@ check "visual-diff matches baseline (similarity=$VD2_SIM)" $?
 echo ""
 echo "=== Cleanup before regression ==="
 cleanup_daemon
-rm -f ~/.browser-tools/baselines/s06-regression.png
+rm -f ~/.gsd-browser/baselines/s06-regression.png
 echo "  Daemon stopped, temp files cleaned"
 
 echo ""

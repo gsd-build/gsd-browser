@@ -14,7 +14,7 @@ const ARGON2_SALT_LEN: usize = 16;
 const NONCE_LEN: usize = 12;
 
 fn vault_dir() -> PathBuf {
-    browser_tools_common::state_dir().join("vault")
+    gsd_browser_common::state_dir().join("vault")
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,8 +59,8 @@ impl EncryptedBlob {
 }
 
 fn get_vault_key() -> Result<String, String> {
-    std::env::var("BROWSER_TOOLS_VAULT_KEY").map_err(|_| {
-        "BROWSER_TOOLS_VAULT_KEY environment variable not set. \
+    std::env::var("GSD_BROWSER_VAULT_KEY").map_err(|_| {
+        "GSD_BROWSER_VAULT_KEY environment variable not set. \
          Set it to a passphrase to encrypt/decrypt the auth vault."
             .to_string()
     })

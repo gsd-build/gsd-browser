@@ -5,7 +5,7 @@ mod logs;
 mod settle;
 mod state;
 
-use browser_tools_common::{
+use gsd_browser_common::{
     config::Config, ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
     ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
 };
@@ -26,8 +26,8 @@ use tracing::{debug, error, info, warn};
 
 #[tokio::main]
 async fn main() {
-    // Initialize tracing — respect BROWSER_TOOLS_DEBUG for verbose output
-    let filter = if std::env::var("BROWSER_TOOLS_DEBUG").is_ok() {
+    // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
+    let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
         "debug"
     } else {
         "info"
@@ -39,7 +39,7 @@ async fn main() {
         .init();
 
     if let Err(e) = run_daemon().await {
-        error!("[browser-tools-daemon] fatal: {e}");
+        error!("[gsd-browser-daemon] fatal: {e}");
         process::exit(1);
     }
 }
@@ -47,7 +47,7 @@ async fn main() {
 async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
-    info!("[browser-tools-daemon] config loaded (settle timeout={}ms, screenshot quality={})",
+    info!("[gsd-browser-daemon] config loaded (settle timeout={}ms, screenshot quality={})",
         config.settle.timeout_ms, config.screenshot.quality);
 
     let browser_path_arg = std::env::args()
@@ -94,7 +94,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         if stale {
-            warn!("[browser-tools-daemon] removing stale socket");
+            warn!("[gsd-browser-daemon] removing stale socket");
             let _ = fs::remove_file(&sock_path);
             let _ = fs::remove_file(&pid_file_path);
         } else {
@@ -105,16 +105,16 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Write PID file
     fs::write(&pid_file_path, process::id().to_string())?;
     info!(
-        "[browser-tools-daemon] PID {} written to {:?}",
+        "[gsd-browser-daemon] PID {} written to {:?}",
         process::id(),
         pid_file_path
     );
 
     // Discover and launch Chrome
-    let chrome_path = browser_tools_common::chrome::find_chrome(effective_browser_path.as_deref())
+    let chrome_path = gsd_browser_common::chrome::find_chrome(effective_browser_path.as_deref())
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     info!(
-        "[browser-tools-daemon] launching Chrome from {:?}",
+        "[gsd-browser-daemon] launching Chrome from {:?}",
         chrome_path
     );
 
@@ -124,7 +124,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
     let (mut browser, mut handler) = Browser::launch(config).await?;
-    info!("[browser-tools-daemon] Chrome launched successfully");
+    info!("[gsd-browser-daemon] Chrome launched successfully");
 
     // Handler must be polled continuously — spawn it
     let handler_task = tokio::spawn(async move {
@@ -137,30 +137,30 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
 
     // Create initial page
     let page = browser.new_page("about:blank").await?;
-    info!("[browser-tools-daemon] initial page created");
+    info!("[gsd-browser-daemon] initial page created");
 
     // Inject browser-side helpers and install mutation counter
     helpers::inject_helpers(&page).await;
     settle::ensure_mutation_counter(&page).await;
-    info!("[browser-tools-daemon] browser helpers injected, mutation counter installed");
+    info!("[gsd-browser-daemon] browser helpers injected, mutation counter installed");
 
     // Enable CDP domains for event listening
     if let Err(e) = page.execute(RuntimeEnableParams::default()).await {
-        warn!("[browser-tools-daemon] Runtime.enable failed (non-fatal): {e}");
+        warn!("[gsd-browser-daemon] Runtime.enable failed (non-fatal): {e}");
     } else {
-        debug!("[browser-tools-daemon] Runtime domain enabled");
+        debug!("[gsd-browser-daemon] Runtime domain enabled");
     }
     if let Err(e) = page.execute(NetworkEnableParams::default()).await {
-        warn!("[browser-tools-daemon] Network.enable failed (non-fatal): {e}");
+        warn!("[gsd-browser-daemon] Network.enable failed (non-fatal): {e}");
     } else {
-        debug!("[browser-tools-daemon] Network domain enabled");
+        debug!("[gsd-browser-daemon] Network domain enabled");
     }
     if let Err(e) = page.execute(PageEnableParams::default()).await {
-        warn!("[browser-tools-daemon] Page.enable failed (non-fatal): {e}");
+        warn!("[gsd-browser-daemon] Page.enable failed (non-fatal): {e}");
     } else {
-        debug!("[browser-tools-daemon] Page domain enabled");
+        debug!("[gsd-browser-daemon] Page domain enabled");
     }
-    info!("[browser-tools-daemon] CDP domains enabled");
+    info!("[gsd-browser-daemon] CDP domains enabled");
 
     // Create log buffers and spawn event listeners
     let daemon_logs = Arc::new(DaemonLogs::new());
@@ -169,7 +169,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
     logs::spawn_dialog_listener(&page, daemon_logs.dialog.clone()).await;
-    info!("[browser-tools-daemon] event listeners spawned");
+    info!("[gsd-browser-daemon] event listeners spawned");
 
     // Register initial page in the PageRegistry
     {
@@ -181,7 +181,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
     info!(
-        "[browser-tools-daemon] listening on {:?}",
+        "[gsd-browser-daemon] listening on {:?}",
         sock_path
     );
 
@@ -194,18 +194,18 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
             accept_result = listener.accept() => {
                 match accept_result {
                     Ok((stream, _addr)) => {
-                        info!("[browser-tools-daemon] connection accepted");
+                        info!("[gsd-browser-daemon] connection accepted");
                         let logs = Arc::clone(&daemon_logs);
                         let state = Arc::clone(&daemon_state);
                         tokio::spawn(handle_connection(stream, logs, state));
                     }
                     Err(e) => {
-                        error!("[browser-tools-daemon] accept error: {e}");
+                        error!("[gsd-browser-daemon] accept error: {e}");
                     }
                 }
             }
             _ = &mut shutdown => {
-                info!("[browser-tools-daemon] shutting down...");
+                info!("[gsd-browser-daemon] shutting down...");
                 break;
             }
         }
@@ -218,7 +218,7 @@ async fn run_daemon() -> Result<(), Box<dyn std::error::Error>> {
     handler_task.abort();
     let _ = fs::remove_file(&sock_path);
     let _ = fs::remove_file(&pid_file_path);
-    info!("[browser-tools-daemon] shutdown complete");
+    info!("[gsd-browser-daemon] shutdown complete");
 
     Ok(())
 }
@@ -232,7 +232,7 @@ async fn handle_connection(
         Ok(data) if data.is_empty() => return,
         Ok(data) => data,
         Err(e) => {
-            error!("[browser-tools-daemon] read error: {e}");
+            error!("[gsd-browser-daemon] read error: {e}");
             return;
         }
     };
@@ -248,7 +248,7 @@ async fn handle_connection(
     };
 
     info!(
-        "[browser-tools-daemon] request: method={} id={}",
+        "[gsd-browser-daemon] request: method={} id={}",
         request.method, request.id
     );
 
@@ -269,7 +269,7 @@ async fn handle_connection(
 
     let payload = serde_json::to_vec(&response).unwrap();
     if let Err(e) = ipc::write_message(&mut stream, &payload).await {
-        error!("[browser-tools-daemon] write error: {e}");
+        error!("[gsd-browser-daemon] write error: {e}");
     }
 }
 

@@ -9,7 +9,7 @@
 use super::interaction::handle_click;
 use crate::capture::capture_compact_page_state;
 use crate::settle::{ensure_mutation_counter, settle_after_action};
-use browser_tools_common::types::SettleOptions;
+use gsd_browser_common::types::SettleOptions;
 use chromiumoxide::Page;
 use serde_json::{json, Value};
 use std::time::Duration;

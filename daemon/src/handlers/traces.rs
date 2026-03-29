@@ -1,7 +1,7 @@
 //! CDP Tracing domain — start/stop performance traces.
 
 use crate::state::DaemonState;
-use browser_tools_common::state_dir;
+use gsd_browser_common::state_dir;
 use chromiumoxide::cdp::browser_protocol::tracing::{
     EndParams as TracingEndParams, EventDataCollected, EventTracingComplete,
     StartParams as TracingStartParams,

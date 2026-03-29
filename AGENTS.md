@@ -1,21 +1,21 @@
 # AGENTS.md
 
-## browser-tools
+## gsd-browser
 
 Native Rust browser automation CLI for AI agents. Controls Chrome/Chromium via CDP with a persistent background daemon. Supports navigation, element interaction (click, type, fill), snapshots with versioned refs, assertions, form analysis, structured data extraction, visual regression testing, network mocking, device emulation, auth vault, and prompt injection scanning.
 
 ### Quick Start
 
 ```bash
-browser-tools navigate https://example.com
-browser-tools snapshot
-browser-tools click-ref @v1:e3
+gsd-browser navigate https://example.com
+gsd-browser snapshot
+gsd-browser click-ref @v1:e3
 ```
 
 ### Installation
 
 ```bash
-npm install -g @gsd-build/browser-tools
+npm install -g @gsd-build/gsd-browser
 ```
 
 Requires Chrome or Chromium installed on the system.

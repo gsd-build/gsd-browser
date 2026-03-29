@@ -4,7 +4,7 @@
 //! background tokio tasks that consume CDP event streams and push entries
 //! into shared buffers.
 
-use browser_tools_common::types::{ConsoleLogEntry, DialogLogEntry, NetworkLogEntry};
+use gsd_browser_common::types::{ConsoleLogEntry, DialogLogEntry, NetworkLogEntry};
 use chromiumoxide::cdp::browser_protocol::network::{EventLoadingFailed, EventResponseReceived};
 use chromiumoxide::cdp::browser_protocol::page::{
     EventJavascriptDialogOpening, HandleJavaScriptDialogParams,
@@ -292,7 +292,7 @@ pub async fn spawn_dialog_listener(page: &Page, buffer: LogBuffer<DialogLogEntry
 #[cfg(test)]
 mod tests {
     use super::*;
-    use browser_tools_common::types::ConsoleLogEntry;
+    use gsd_browser_common::types::ConsoleLogEntry;
 
     #[test]
     fn log_buffer_push_and_drain() {

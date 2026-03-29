@@ -4,7 +4,7 @@
 //! JS evaluate calls into the Chrome page to install a MutationObserver, read
 //! the mutation counter + focus state, and poll until the DOM is quiet.
 
-use browser_tools_common::types::{SettleOptions, SettleResult};
+use gsd_browser_common::types::{SettleOptions, SettleResult};
 use chromiumoxide::Page;
 use std::time::{Duration, Instant};
 use tokio::time::{sleep, timeout};

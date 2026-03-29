@@ -1,9 +1,9 @@
 //! Configuration loading with 5-layer merge precedence:
 //!
 //! 1. Compiled defaults (matching all current hardcoded values)
-//! 2. User config: `~/.browser-tools/config.toml`
-//! 3. Project config: `./browser-tools.toml`
-//! 4. Environment variables: `BROWSER_TOOLS_*`
+//! 2. User config: `~/.gsd-browser/config.toml`
+//! 3. Project config: `./gsd-browser.toml`
+//! 4. Environment variables: `GSD_BROWSER_*`
 //! 5. CLI flags (applied by caller after loading)
 
 use serde::{Deserialize, Serialize};
@@ -143,7 +143,7 @@ impl Default for LogsConfig {
 #[serde(default)]
 pub struct ArtifactsConfig {
     /// Base directory for artifacts (screenshots, PDFs, traces, etc.).
-    /// Default: `~/.browser-tools/artifacts`
+    /// Default: `~/.gsd-browser/artifacts`
     pub dir: Option<String>,
 }
 
@@ -178,9 +178,9 @@ impl Config {
     /// Load configuration with 5-layer merge (CLI flags applied by caller):
     ///
     /// 1. Compiled defaults
-    /// 2. User config: `~/.browser-tools/config.toml`
-    /// 3. Project config: `./browser-tools.toml`
-    /// 4. `BROWSER_TOOLS_*` environment variables
+    /// 2. User config: `~/.gsd-browser/config.toml`
+    /// 3. Project config: `./gsd-browser.toml`
+    /// 4. `GSD_BROWSER_*` environment variables
     ///
     /// Returns the default config if no files exist and no env vars are set.
     /// Logs warnings on parse errors but never panics.
@@ -189,12 +189,12 @@ impl Config {
 
         // Layer 2: User config
         if let Some(home) = dirs::home_dir() {
-            let user_path = home.join(".browser-tools").join("config.toml");
+            let user_path = home.join(".gsd-browser").join("config.toml");
             config.merge_file(&user_path, "user");
         }
 
         // Layer 3: Project config
-        let project_path = PathBuf::from("browser-tools.toml");
+        let project_path = PathBuf::from("gsd-browser.toml");
         config.merge_file(&project_path, "project");
 
         // Layer 4: Environment variable overrides
@@ -273,82 +273,82 @@ impl Config {
         debug!("[config] merged {} config successfully", label);
     }
 
-    /// Apply `BROWSER_TOOLS_*` environment variable overrides.
+    /// Apply `GSD_BROWSER_*` environment variable overrides.
     ///
-    /// Naming convention: `BROWSER_TOOLS_<SECTION>_<FIELD>` in SCREAMING_SNAKE_CASE.
-    /// Example: `BROWSER_TOOLS_SCREENSHOT_QUALITY=50`
+    /// Naming convention: `GSD_BROWSER_<SECTION>_<FIELD>` in SCREAMING_SNAKE_CASE.
+    /// Example: `GSD_BROWSER_SCREENSHOT_QUALITY=50`
     fn apply_env_overrides(&mut self) {
         // Browser
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_BROWSER_PATH") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_BROWSER_PATH") {
             self.browser.path = Some(v);
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_BROWSER_HEADLESS") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_BROWSER_HEADLESS") {
             if let Ok(b) = v.parse::<bool>() {
                 self.browser.headless = b;
             }
         }
 
         // Screenshot
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SCREENSHOT_QUALITY") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SCREENSHOT_QUALITY") {
             if let Ok(q) = v.parse::<u32>() {
                 self.screenshot.quality = q;
             }
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SCREENSHOT_FORMAT") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SCREENSHOT_FORMAT") {
             self.screenshot.format = v;
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SCREENSHOT_FULL_PAGE") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SCREENSHOT_FULL_PAGE") {
             if let Ok(b) = v.parse::<bool>() {
                 self.screenshot.full_page = b;
             }
         }
 
         // Settle
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SETTLE_TIMEOUT_MS") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SETTLE_TIMEOUT_MS") {
             if let Ok(n) = v.parse::<u64>() {
                 self.settle.timeout_ms = n;
             }
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SETTLE_POLL_MS") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SETTLE_POLL_MS") {
             if let Ok(n) = v.parse::<u64>() {
                 self.settle.poll_ms = n;
             }
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_SETTLE_QUIET_WINDOW_MS") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_SETTLE_QUIET_WINDOW_MS") {
             if let Ok(n) = v.parse::<u64>() {
                 self.settle.quiet_window_ms = n;
             }
         }
 
         // Logs
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_LOGS_MAX_BUFFER_SIZE") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_LOGS_MAX_BUFFER_SIZE") {
             if let Ok(n) = v.parse::<usize>() {
                 self.logs.max_buffer_size = n;
             }
         }
 
         // Artifacts
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_ARTIFACTS_DIR") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_ARTIFACTS_DIR") {
             self.artifacts.dir = Some(v);
         }
 
         // Daemon
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_DAEMON_HOST") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_DAEMON_HOST") {
             self.daemon.host = v;
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_DAEMON_PORT") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_DAEMON_PORT") {
             if let Ok(n) = v.parse::<u16>() {
                 self.daemon.port = n;
             }
         }
 
         // Timeline
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_TIMELINE_ENABLED") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_TIMELINE_ENABLED") {
             if let Ok(b) = v.parse::<bool>() {
                 self.timeline.enabled = b;
             }
         }
-        if let Ok(v) = std::env::var("BROWSER_TOOLS_TIMELINE_MAX_ENTRIES") {
+        if let Ok(v) = std::env::var("GSD_BROWSER_TIMELINE_MAX_ENTRIES") {
             if let Ok(n) = v.parse::<usize>() {
                 self.timeline.max_entries = n;
             }
@@ -481,10 +481,10 @@ quality = 90
         let _lock = ENV_LOCK.lock().unwrap();
 
         // Set env vars
-        std::env::set_var("BROWSER_TOOLS_SCREENSHOT_QUALITY", "42");
-        std::env::set_var("BROWSER_TOOLS_SETTLE_TIMEOUT_MS", "2000");
-        std::env::set_var("BROWSER_TOOLS_LOGS_MAX_BUFFER_SIZE", "500");
-        std::env::set_var("BROWSER_TOOLS_BROWSER_PATH", "/usr/bin/chromium");
+        std::env::set_var("GSD_BROWSER_SCREENSHOT_QUALITY", "42");
+        std::env::set_var("GSD_BROWSER_SETTLE_TIMEOUT_MS", "2000");
+        std::env::set_var("GSD_BROWSER_LOGS_MAX_BUFFER_SIZE", "500");
+        std::env::set_var("GSD_BROWSER_BROWSER_PATH", "/usr/bin/chromium");
 
         let mut config = Config::default();
         config.apply_env_overrides();
@@ -498,22 +498,22 @@ quality = 90
         );
 
         // Clean up
-        std::env::remove_var("BROWSER_TOOLS_SCREENSHOT_QUALITY");
-        std::env::remove_var("BROWSER_TOOLS_SETTLE_TIMEOUT_MS");
-        std::env::remove_var("BROWSER_TOOLS_LOGS_MAX_BUFFER_SIZE");
-        std::env::remove_var("BROWSER_TOOLS_BROWSER_PATH");
+        std::env::remove_var("GSD_BROWSER_SCREENSHOT_QUALITY");
+        std::env::remove_var("GSD_BROWSER_SETTLE_TIMEOUT_MS");
+        std::env::remove_var("GSD_BROWSER_LOGS_MAX_BUFFER_SIZE");
+        std::env::remove_var("GSD_BROWSER_BROWSER_PATH");
     }
 
     #[test]
     fn env_var_invalid_value_ignored() {
         let _lock = ENV_LOCK.lock().unwrap();
 
-        std::env::set_var("BROWSER_TOOLS_SCREENSHOT_QUALITY", "not_a_number");
+        std::env::set_var("GSD_BROWSER_SCREENSHOT_QUALITY", "not_a_number");
         let mut config = Config::default();
         config.apply_env_overrides();
         // Should remain at default because parse failed
         assert_eq!(config.screenshot.quality, 80);
-        std::env::remove_var("BROWSER_TOOLS_SCREENSHOT_QUALITY");
+        std::env::remove_var("GSD_BROWSER_SCREENSHOT_QUALITY");
     }
 
     #[test]
@@ -576,7 +576,7 @@ quality = 70
         config.merge_file(&project_path, "project");
 
         // Layer 4: env var overrides settle timeout
-        std::env::set_var("BROWSER_TOOLS_SETTLE_TIMEOUT_MS", "1500");
+        std::env::set_var("GSD_BROWSER_SETTLE_TIMEOUT_MS", "1500");
         config.apply_env_overrides();
 
         // Final result:
@@ -591,6 +591,6 @@ quality = 70
         // logs.max_buffer_size = 1000 (untouched default)
         assert_eq!(config.logs.max_buffer_size, 1000);
 
-        std::env::remove_var("BROWSER_TOOLS_SETTLE_TIMEOUT_MS");
+        std::env::remove_var("GSD_BROWSER_SETTLE_TIMEOUT_MS");
     }
 }

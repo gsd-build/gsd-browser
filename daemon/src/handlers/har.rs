@@ -1,7 +1,7 @@
 //! HAR 1.2 export from the network log buffer.
 
 use crate::logs::DaemonLogs;
-use browser_tools_common::state_dir;
+use gsd_browser_common::state_dir;
 use serde_json::{json, Value};
 use std::fs;
 
@@ -66,7 +66,7 @@ pub fn handle_har_export(logs: &DaemonLogs, params: &Value) -> Result<Value, Str
         "log": {
             "version": "1.2",
             "creator": {
-                "name": "browser-tools",
+                "name": "gsd-browser",
                 "version": env!("CARGO_PKG_VERSION"),
             },
             "entries": har_entries,
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn har_export_with_entries() {
-        use browser_tools_common::types::NetworkLogEntry;
+        use gsd_browser_common::types::NetworkLogEntry;
         let logs = DaemonLogs::new();
         logs.network.push(NetworkLogEntry {
             method: "GET".to_string(),

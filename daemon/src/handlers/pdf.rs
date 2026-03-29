@@ -4,11 +4,11 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 use tracing::debug;
 
-/// Get the artifacts directory at ~/.browser-tools/artifacts/
+/// Get the artifacts directory at ~/.gsd-browser/artifacts/
 fn artifacts_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join(".browser-tools")
+        .join(".gsd-browser")
         .join("artifacts")
 }
 
