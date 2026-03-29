@@ -5,11 +5,11 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/anthropics/gsd-browser.git"
+    "url": "https://github.com/glittercowboy/gsd-browser.git"
   },
-  "homepage": "https://github.com/anthropics/gsd-browser",
+  "homepage": "https://github.com/glittercowboy/gsd-browser",
   "bugs": {
-    "url": "https://github.com/anthropics/gsd-browser/issues"
+    "url": "https://github.com/glittercowboy/gsd-browser/issues"
   },
   "keywords": [
     "browser",
