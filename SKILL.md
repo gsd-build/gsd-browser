@@ -196,15 +196,34 @@ Find and act on elements by semantic intent — no selectors or refs needed.
 browser-tools find-best --intent submit_form
 browser-tools find-best --intent close_dialog
 browser-tools find-best --intent primary_cta --scope "#modal"
+browser-tools find-best --intent accept_cookies
 
 # Act: find best match and click/focus it in one call
 browser-tools act --intent submit_form
 browser-tools act --intent close_dialog
 browser-tools act --intent search_field
-browser-tools act --intent next_step
+browser-tools act --intent fill_email
 ```
 
-**Intents:** `submit_form`, `close_dialog`, `primary_cta`, `search_field`, `next_step`, `dismiss`, `auth_action`, `back_navigation`.
+**Intents (15):**
+
+| Intent | Action | Description |
+|--------|--------|-------------|
+| `submit_form` | click | Submit buttons, form actions |
+| `close_dialog` | click | Modal/dialog close buttons |
+| `primary_cta` | click | Primary call-to-action elements |
+| `search_field` | focus | Search inputs and searchboxes |
+| `next_step` | click | Next/continue/proceed buttons |
+| `dismiss` | click | Dismiss overlays, banners, toasts |
+| `auth_action` | click | Login/signup/register buttons |
+| `back_navigation` | click | Back/previous navigation links |
+| `fill_email` | focus | Email input fields |
+| `fill_password` | focus | Password input fields |
+| `fill_username` | focus | Username/login input fields |
+| `accept_cookies` | click | Cookie consent accept buttons |
+| `main_content` | click | Main content area (`<main>`, `<article>`) |
+| `pagination_next` | click | Next page in pagination |
+| `pagination_prev` | click | Previous page in pagination |
 
 ### Pages & Frames
 

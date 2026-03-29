@@ -272,7 +272,7 @@ pub async fn handle_snapshot(
     let result = timeout(EVAL_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| "snapshot: JS evaluation timed out (10s)".to_string())?
-        .map_err(|e| format!("snapshot: JS evaluation failed: {e}"))?;
+        .map_err(|e| format!("snapshot: JS evaluation failed: {}", super::clean_cdp_error(&e)))?;
 
     let raw_str = result
         .value()
@@ -418,7 +418,7 @@ async fn resolve_ref(
     let result = timeout(EVAL_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| "resolve_ref: JS evaluation timed out".to_string())?
-        .map_err(|e| format!("resolve_ref: JS evaluation failed: {e}"))?;
+        .map_err(|e| format!("resolve_ref: JS evaluation failed: {}", super::clean_cdp_error(&e)))?;
 
     let raw_str = result
         .value()

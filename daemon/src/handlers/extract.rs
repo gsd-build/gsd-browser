@@ -28,7 +28,7 @@ pub async fn handle_extract(page: &Page, params: &Value) -> Result<Value, String
     let eval_result = page
         .evaluate_expression(&js)
         .await
-        .map_err(|e| format!("extraction JS failed: {e}"))?;
+        .map_err(|e| format!("extraction JS failed: {}", super::clean_cdp_error(&e)))?;
 
     let raw_value = eval_result
         .value()

@@ -179,7 +179,7 @@ pub async fn handle_list_frames(page: &Page) -> Result<Value, String> {
     let raw = page
         .evaluate(js)
         .await
-        .map_err(|e| format!("list_frames JS eval failed: {e}"))?;
+        .map_err(|e| format!("list_frames JS eval failed: {}", super::clean_cdp_error(&e)))?;
 
     let json_str = raw
         .into_value::<String>()

@@ -79,7 +79,7 @@ browser-tools extract --schema '{"title": {"_selector": "h1"}}'
 - **Single binary** — no Node.js runtime, no browser driver downloads
 - **63 commands** — covers the full browser automation surface
 - **Deterministic element refs** — `snapshot` assigns versioned refs (`@v1:e1`) for stable interaction
-- **Semantic actions** — `find-best` and `act` resolve intent to elements automatically
+- **Semantic actions** — `find-best` and `act` resolve 15 predefined intents (forms, auth, cookies, pagination, navigation, dialogs) to elements automatically
 - **Network mocking** — intercept requests, block URLs, export HAR files
 - **Visual regression** — pixel-level diffing against baselines
 - **Encrypted auth vault** — save and replay login credentials securely
@@ -161,7 +161,7 @@ browser-tools ships with `SKILL.md` and `AGENTS.md` for automatic agent discover
 1. Read `SKILL.md` for complete command reference and workflow patterns
 2. Use `--json` output for structured data parsing
 3. Use `snapshot` → `click-ref`/`fill-ref` for deterministic element interaction
-4. Use `find-best`/`act` for semantic intent resolution
+4. Use `find-best`/`act` for predefined intent resolution (8 built-in intents)
 5. Use `wait-for` to handle async state changes reliably
 
 ## License
