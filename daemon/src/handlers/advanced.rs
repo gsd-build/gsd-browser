@@ -189,7 +189,7 @@ pub async fn handle_check_injection(page: &Page, params: &Value) -> Result<Value
     let result = page
         .evaluate(call_js)
         .await
-        .map_err(|e| format!("injection scan failed: {e}"))?;
+        .map_err(|e| format!("injection scan failed: {}", super::clean_cdp_error(&e)))?;
 
     let val = result.into_value::<Value>().unwrap_or(json!(null));
 

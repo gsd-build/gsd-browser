@@ -213,7 +213,7 @@ pub async fn handle_analyze_form(page: &Page, params: &Value) -> Result<Value, S
     let result = timeout(JS_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| "analyze_form timed out".to_string())?
-        .map_err(|e| format!("analyze_form failed: {e}"))?;
+        .map_err(|e| format!("analyze_form failed: {}", super::clean_cdp_error(&e)))?;
 
     let data = result.value().cloned().unwrap_or(json!({}));
     Ok(data)
@@ -364,7 +364,7 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
     let result = timeout(JS_TIMEOUT, page.evaluate_expression(&resolve_js))
         .await
         .map_err(|_| "fill_form: timed out resolving field selectors".to_string())?
-        .map_err(|e| format!("fill_form: field resolution failed: {e}"))?;
+        .map_err(|e| format!("fill_form: field resolution failed: {}", super::clean_cdp_error(&e)))?;
 
     let resolve_data = result.value().cloned().unwrap_or(json!({}));
     let resolved = resolve_data

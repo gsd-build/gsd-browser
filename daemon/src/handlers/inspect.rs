@@ -130,7 +130,7 @@ pub async fn handle_eval(page: &Page, params: &Value) -> Result<Value, String> {
     )
     .await
     .map_err(|_| "eval timed out after 30s".to_string())?
-    .map_err(|e| format!("eval error: {e}"))?;
+    .map_err(|e| format!("eval error: {}", super::clean_cdp_error(&e)))?;
 
     // Serialize the result to a JSON string
     let value = result.value().cloned().unwrap_or(Value::Null);
@@ -244,7 +244,7 @@ pub async fn handle_accessibility_tree(page: &Page, params: &Value) -> Result<Va
     let result = timeout(Duration::from_secs(30), page.evaluate_expression(&js))
         .await
         .map_err(|_| "accessibility_tree timed out after 30s".to_string())?
-        .map_err(|e| format!("accessibility_tree error: {e}"))?;
+        .map_err(|e| format!("accessibility_tree error: {}", super::clean_cdp_error(&e)))?;
 
     let value = result.value().cloned().unwrap_or(Value::Null);
     let json_str = value.as_str().unwrap_or("{}");
@@ -341,7 +341,7 @@ pub async fn handle_find(page: &Page, params: &Value) -> Result<Value, String> {
     let result = timeout(Duration::from_secs(30), page.evaluate_expression(&js))
         .await
         .map_err(|_| "find timed out after 30s".to_string())?
-        .map_err(|e| format!("find error: {e}"))?;
+        .map_err(|e| format!("find error: {}", super::clean_cdp_error(&e)))?;
 
     let value = result.value().cloned().unwrap_or(Value::Null);
     let json_str = value.as_str().unwrap_or("{}");
@@ -365,7 +365,7 @@ pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, St
         let content = timeout(Duration::from_secs(30), page.content())
             .await
             .map_err(|_| "page_source timed out after 30s".to_string())?
-            .map_err(|e| format!("page_source error: {e}"))?;
+            .map_err(|e| format!("page_source error: {}", super::clean_cdp_error(&e)))?;
         content
     } else {
         // Evaluate JS to get outerHTML of the selected element
@@ -380,7 +380,7 @@ pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, St
         let result = timeout(Duration::from_secs(30), page.evaluate_expression(&js))
             .await
             .map_err(|_| "page_source timed out after 30s".to_string())?
-            .map_err(|e| format!("page_source error: {e}"))?;
+            .map_err(|e| format!("page_source error: {}", super::clean_cdp_error(&e)))?;
 
         let value = result.value().cloned().unwrap_or(Value::Null);
         value.as_str().unwrap_or("").to_string()

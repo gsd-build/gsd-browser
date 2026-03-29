@@ -1,6 +1,6 @@
 //! Handlers for intent-scored element discovery and semantic actions.
 //!
-//! `find_best` — scores visible interactive elements against 8 semantic intents,
+//! `find_best` — scores visible elements against 15 semantic intents,
 //! returns the top 5 candidates with scores and reasons.
 //!
 //! `act` — composite handler: runs find_best internally, takes the top candidate,
@@ -17,6 +17,26 @@ use tokio::time::timeout;
 use tracing::debug;
 
 const JS_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// All valid intent names for find_best/act.
+#[cfg(test)]
+const VALID_INTENTS: &[&str] = &[
+    "submit_form",
+    "close_dialog",
+    "primary_cta",
+    "search_field",
+    "next_step",
+    "dismiss",
+    "auth_action",
+    "back_navigation",
+    "fill_email",
+    "fill_password",
+    "fill_username",
+    "accept_cookies",
+    "main_content",
+    "pagination_next",
+    "pagination_prev",
+];
 
 /// Settle and capture page state after intent actions.
 async fn settle_and_capture(page: &Page) -> (Value, Value) {
@@ -51,11 +71,12 @@ fn intent_scoring_js(intent: &str, scope_selector: Option<&str>) -> String {
     const root = scopeSel ? document.querySelector(scopeSel) : document;
     if (!root) throw new Error('scope element not found: ' + scopeSel);
 
-    // Collect all interactive elements
-    const candidates = Array.from(root.querySelectorAll(
-        'a, button, input, select, textarea, [role=button], [role=link], [role=menuitem], ' +
-        '[role=tab], [role=search], [role=searchbox], [tabindex], [onclick]'
-    ));
+    // Collect candidate elements — interactive by default, expanded for content intents
+    const interactiveSel = 'a, button, input, select, textarea, [role=button], [role=link], [role=menuitem], ' +
+        '[role=tab], [role=search], [role=searchbox], [tabindex], [onclick]';
+    const contentSel = 'main, article, section, [role=main], [role=article], div';
+    const sel = intent === 'main_content' ? interactiveSel + ', ' + contentSel : interactiveSel;
+    const candidates = Array.from(root.querySelectorAll(sel));
 
     function isVisible(el) {{
         if (el.hidden || el.disabled) return false;
@@ -225,6 +246,106 @@ fn intent_scoring_js(intent: &str, scope_selector: Option<&str>) -> String {
             }}
             return {{ score, reasons }};
         }},
+        fill_email(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (type === 'email') {{ score += 0.6; reasons.push('type=email'); }}
+            if (/email|e-mail/i.test(el.name || el.placeholder || aria || '')) {{
+                score += 0.4; reasons.push('email in attributes');
+            }}
+            if (el.autocomplete === 'email') {{ score += 0.3; reasons.push('autocomplete=email'); }}
+            if (tag === 'input') {{ score += 0.05; reasons.push('is input'); }}
+            return {{ score, reasons }};
+        }},
+        fill_password(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (type === 'password') {{ score += 0.7; reasons.push('type=password'); }}
+            if (/password|passwd|pass/i.test(el.name || el.placeholder || aria || '')) {{
+                score += 0.3; reasons.push('password in attributes');
+            }}
+            if (el.autocomplete === 'current-password' || el.autocomplete === 'new-password') {{
+                score += 0.2; reasons.push('autocomplete=password');
+            }}
+            return {{ score, reasons }};
+        }},
+        fill_username(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (/user.?name|login|account/i.test(el.name || el.placeholder || aria || '')) {{
+                score += 0.5; reasons.push('username in attributes');
+            }}
+            if (el.autocomplete === 'username') {{ score += 0.4; reasons.push('autocomplete=username'); }}
+            if (type === 'text' && el.closest('form')) {{
+                const form = el.closest('form');
+                if (form.querySelector('input[type=password]')) {{
+                    score += 0.2; reasons.push('text input in form with password');
+                }}
+            }}
+            if (tag === 'input') {{ score += 0.05; reasons.push('is input'); }}
+            return {{ score, reasons }};
+        }},
+        accept_cookies(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (/accept|agree|consent|allow|got.?it|ok|i.?understand/i.test(text || aria)) {{
+                score += 0.3; reasons.push('accept-like text');
+            }}
+            if (/cookie/i.test(text || aria)) {{
+                score += 0.2; reasons.push('mentions cookies');
+            }}
+            const banner = el.closest('[class*=cookie], [class*=consent], [class*=gdpr], [class*=privacy], [id*=cookie], [id*=consent]');
+            if (banner) {{ score += 0.3; reasons.push('inside cookie/consent banner'); }}
+            if (tag === 'button' || role === 'button') {{ score += 0.1; reasons.push('is button'); }}
+            // Prefer primary/accept over reject/settings
+            if (/reject|decline|settings|manage|customize/i.test(text || aria)) {{
+                score -= 0.3; reasons.push('reject/settings (penalty)');
+            }}
+            return {{ score, reasons }};
+        }},
+        main_content(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (role === 'main') {{ score += 0.6; reasons.push('role=main'); }}
+            if (tag === 'main') {{ score += 0.6; reasons.push('<main> element'); }}
+            if (tag === 'article') {{ score += 0.4; reasons.push('<article> element'); }}
+            if (el.id && /content|main|article|body/i.test(el.id)) {{
+                score += 0.3; reasons.push('content-like id');
+            }}
+            if (el.className && /content|main|article|body/i.test(el.className)) {{
+                score += 0.2; reasons.push('content-like class');
+            }}
+            // Larger area = more likely main content
+            const rect = el.getBoundingClientRect();
+            if (rect.width > 500 && rect.height > 300) {{
+                score += 0.15; reasons.push('large area');
+            }}
+            return {{ score, reasons }};
+        }},
+        pagination_next(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (/next|›|>>|→|older/i.test(text || aria)) {{
+                score += 0.4; reasons.push('next-like text');
+            }}
+            if (el.rel === 'next') {{ score += 0.5; reasons.push('rel=next'); }}
+            const nav = el.closest('nav, [role=navigation], [class*=paginat], [class*=pager]');
+            if (nav) {{ score += 0.2; reasons.push('inside pagination nav'); }}
+            if (tag === 'a' || tag === 'button') {{ score += 0.05; reasons.push('interactive element'); }}
+            return {{ score, reasons }};
+        }},
+        pagination_prev(el, tag, type, text, role, aria) {{
+            let score = 0;
+            let reasons = [];
+            if (/prev|previous|‹|<<|←|newer/i.test(text || aria)) {{
+                score += 0.4; reasons.push('prev-like text');
+            }}
+            if (el.rel === 'prev') {{ score += 0.5; reasons.push('rel=prev'); }}
+            const nav = el.closest('nav, [role=navigation], [class*=paginat], [class*=pager]');
+            if (nav) {{ score += 0.2; reasons.push('inside pagination nav'); }}
+            if (tag === 'a' || tag === 'button') {{ score += 0.05; reasons.push('interactive element'); }}
+            return {{ score, reasons }};
+        }},
     }};
 
     const scorer = intentScorers[intent];
@@ -282,7 +403,7 @@ pub async fn handle_find_best(page: &Page, params: &Value) -> Result<Value, Stri
     let result = timeout(JS_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| format!("find_best timed out for intent: {intent}"))?
-        .map_err(|e| format!("find_best failed: {e}"))?;
+        .map_err(|e| format!("find_best failed: {}", super::clean_cdp_error(&e)))?;
 
     let data = result.value().cloned().unwrap_or(json!({}));
     Ok(data)
@@ -306,7 +427,7 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
     let result = timeout(JS_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| format!("act: find_best timed out for intent: {intent}"))?
-        .map_err(|e| format!("act: find_best failed: {e}"))?;
+        .map_err(|e| format!("act: find_best failed: {}", super::clean_cdp_error(&e)))?;
 
     let find_data = result.value().cloned().unwrap_or(json!({}));
     let candidates = find_data
@@ -330,7 +451,7 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
 
     // Phase 2: Execute the action
     let action_performed;
-    if intent == "search_field" {
+    if matches!(intent, "search_field" | "fill_email" | "fill_password" | "fill_username") {
         // Focus the search field instead of clicking
         let focus_js = format!(
             "(() => {{ const el = document.querySelector({sel}); if (!el) throw new Error('element not found'); el.focus(); return true; }})()",
@@ -339,7 +460,7 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
         timeout(JS_TIMEOUT, page.evaluate_expression(&focus_js))
             .await
             .map_err(|_| "act: focus timed out".to_string())?
-            .map_err(|e| format!("act: focus failed: {e}"))?;
+            .map_err(|e| format!("act: focus failed: {}", super::clean_cdp_error(&e)))?;
         action_performed = "focus";
     } else {
         // Click the element
@@ -368,14 +489,9 @@ mod tests {
     #[test]
     fn intent_scoring_js_includes_all_intents() {
         let js = intent_scoring_js("submit_form", None);
-        assert!(js.contains("submit_form"));
-        assert!(js.contains("close_dialog"));
-        assert!(js.contains("primary_cta"));
-        assert!(js.contains("search_field"));
-        assert!(js.contains("next_step"));
-        assert!(js.contains("dismiss"));
-        assert!(js.contains("auth_action"));
-        assert!(js.contains("back_navigation"));
+        for intent in VALID_INTENTS {
+            assert!(js.contains(intent), "missing intent: {intent}");
+        }
     }
 
     #[test]
@@ -386,17 +502,7 @@ mod tests {
 
     #[test]
     fn valid_intents() {
-        let valid = [
-            "submit_form",
-            "close_dialog",
-            "primary_cta",
-            "search_field",
-            "next_step",
-            "dismiss",
-            "auth_action",
-            "back_navigation",
-        ];
-        for intent in &valid {
+        for intent in VALID_INTENTS {
             let js = intent_scoring_js(intent, None);
             assert!(js.contains(intent));
         }
