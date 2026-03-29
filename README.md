@@ -6,7 +6,15 @@ Built in Rust for speed and reliability. Designed for AI agents, CI pipelines, a
 
 ## Install
 
-### npm (recommended)
+### One-liner (macOS / Linux)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/glittercowboy/gsd-browser/main/install.sh | bash
+```
+
+Downloads the binary + Chromium automatically. Works in CI.
+
+### npm
 
 ```bash
 npm install -g @gsd-build/gsd-browser
@@ -20,7 +28,7 @@ cargo install gsd-browser
 
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/anthropics/gsd-browser/releases) for your platform:
+Download from [GitHub Releases](https://github.com/glittercowboy/gsd-browser/releases):
 
 | Platform | Binary |
 |----------|--------|
@@ -43,7 +51,7 @@ gsd-browser screenshot --output page.png --format png
 gsd-browser accessibility-tree
 
 # Click a button by CSS selector
-gsd-browser click --selector "button.submit"
+gsd-browser click "button.submit"
 
 # Extract structured data
 gsd-browser extract --schema '{"title": {"_selector": "h1"}}'
