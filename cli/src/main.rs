@@ -1,3 +1,4 @@
+mod daemon;
 mod daemon_client;
 mod output;
 
@@ -556,6 +557,16 @@ enum Commands {
         #[arg(long)]
         name: Option<String>,
     },
+    /// Internal: run the daemon server (hidden, used for auto-start)
+    #[command(name = "_serve", hide = true)]
+    Serve {
+        /// Path to Chrome/Chromium binary
+        #[arg(long)]
+        browser_path: Option<String>,
+        /// Named session
+        #[arg(long)]
+        session: Option<String>,
+    },
     /// Daemon management
     Daemon {
         #[command(subcommand)]
@@ -587,6 +598,13 @@ async fn main() {
     }
 
     let result = match &cli.command {
+        Commands::Serve { browser_path, session } => {
+            if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
+                eprintln!("[gsd-browser-daemon] fatal: {e}");
+                std::process::exit(1);
+            }
+            Ok(())
+        }
         Commands::Daemon { cmd } => match cmd {
             DaemonCmd::Start => cmd_daemon_start(&cli).await,
             DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
