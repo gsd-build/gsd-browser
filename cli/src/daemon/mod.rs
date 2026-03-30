@@ -5,16 +5,16 @@ pub mod logs;
 pub mod settle;
 pub mod state;
 
-use gsd_browser_common::{
-    config::Config, ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
-    ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
-};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
 use chromiumoxide::cdp::browser_protocol::page::EnableParams as PageEnableParams;
 use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParams;
 use chromiumoxide::Page;
 use futures::StreamExt;
+use gsd_browser_common::{
+    config::Config, ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
+    ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
+};
 use logs::DaemonLogs;
 use serde_json::json;
 use state::DaemonState;
@@ -26,7 +26,10 @@ use tracing::{debug, error, info, warn};
 
 /// Entry point for the daemon server. Called when the binary is invoked
 /// with the hidden `_daemon` subcommand.
-pub async fn run(browser_path: Option<String>, session: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(
+    browser_path: Option<String>,
+    session: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
     let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
         "debug"
@@ -42,11 +45,39 @@ pub async fn run(browser_path: Option<String>, session: Option<String>) -> Resul
     run_daemon(browser_path, session).await
 }
 
-async fn run_daemon(browser_path_arg: Option<String>, session_arg: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
+async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+
+        let mut sigint = signal(SignalKind::interrupt())?;
+        let mut sigterm = signal(SignalKind::terminate())?;
+
+        tokio::select! {
+            _ = sigint.recv() => {}
+            _ = sigterm.recv() => {}
+        }
+
+        Ok(())
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::signal::ctrl_c().await?;
+        Ok(())
+    }
+}
+
+async fn run_daemon(
+    browser_path_arg: Option<String>,
+    session_arg: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
-    info!("[gsd-browser-daemon] config loaded (settle timeout={}ms, screenshot quality={})",
-        config.settle.timeout_ms, config.screenshot.quality);
+    info!(
+        "[gsd-browser-daemon] config loaded (settle timeout={}ms, screenshot quality={})",
+        config.settle.timeout_ms, config.screenshot.quality
+    );
 
     // CLI --browser-path flag overrides config
     let effective_browser_path = browser_path_arg.or_else(|| config.browser.path.clone());
@@ -68,7 +99,10 @@ async fn run_daemon(browser_path_arg: Option<String>, session_arg: Option<String
     if sock_path.exists() {
         // Check if old PID is alive
         let stale = if pid_file_path.exists() {
-            let old_pid = fs::read_to_string(&pid_file_path)?.trim().parse::<i32>().ok();
+            let old_pid = fs::read_to_string(&pid_file_path)?
+                .trim()
+                .parse::<i32>()
+                .ok();
             match old_pid {
                 Some(pid) => {
                     // Check if process is alive via kill(pid, 0)
@@ -171,13 +205,10 @@ async fn run_daemon(browser_path_arg: Option<String>, session_arg: Option<String
 
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
-    info!(
-        "[gsd-browser-daemon] listening on {:?}",
-        sock_path
-    );
+    info!("[gsd-browser-daemon] listening on {:?}", sock_path);
 
-    // Set up ctrl-c handler for clean shutdown
-    let shutdown = tokio::signal::ctrl_c();
+    // Trap termination signals so `daemon stop` can shut Chrome down cleanly.
+    let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
 
     loop {
@@ -264,15 +295,37 @@ async fn handle_connection(
     }
 }
 
-async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &DaemonState) -> DaemonResponse {
+async fn dispatch(
+    req: &DaemonRequest,
+    page: &Page,
+    logs: &DaemonLogs,
+    state: &DaemonState,
+) -> DaemonResponse {
     // Determine if this method should be timeline-recorded
     let record_timeline = matches!(
         req.method.as_str(),
-        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
-            | "hover" | "scroll" | "select_option" | "set_checked" | "drag"
-            | "snapshot" | "click_ref" | "hover_ref" | "fill_ref"
-            | "assert" | "diff" | "wait_for" | "batch"
-            | "fill_form" | "act"
+        "navigate"
+            | "back"
+            | "forward"
+            | "reload"
+            | "click"
+            | "type"
+            | "press"
+            | "hover"
+            | "scroll"
+            | "select_option"
+            | "set_checked"
+            | "drag"
+            | "snapshot"
+            | "click_ref"
+            | "hover_ref"
+            | "fill_ref"
+            | "assert"
+            | "diff"
+            | "wait_for"
+            | "batch"
+            | "fill_form"
+            | "act"
     );
 
     // Params summary for timeline (truncated to 80 chars)
@@ -302,9 +355,19 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
     // Also store before-state in DiffState for navigate/click/etc.
     if matches!(
         req.method.as_str(),
-        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
-            | "hover" | "click_ref" | "hover_ref" | "fill_ref"
-            | "fill_form" | "act"
+        "navigate"
+            | "back"
+            | "forward"
+            | "reload"
+            | "click"
+            | "type"
+            | "press"
+            | "hover"
+            | "click_ref"
+            | "hover_ref"
+            | "fill_ref"
+            | "fill_form"
+            | "act"
     ) {
         let before_state = capture::capture_compact_page_state(page, false).await;
         let mut diff = state.diff.lock().unwrap();
@@ -320,7 +383,14 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
             _ => String::new(),
         };
         let (status, error) = if response.error.is_some() {
-            ("error", response.error.as_ref().map(|e| e.message.as_str()).unwrap_or(""))
+            (
+                "error",
+                response
+                    .error
+                    .as_ref()
+                    .map(|e| e.message.as_str())
+                    .unwrap_or(""),
+            )
         } else {
             ("ok", "")
         };
@@ -331,9 +401,19 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
     // Store after-state in DiffState for state-mutating methods
     if matches!(
         req.method.as_str(),
-        "navigate" | "back" | "forward" | "reload" | "click" | "type" | "press"
-            | "hover" | "click_ref" | "hover_ref" | "fill_ref"
-            | "fill_form" | "act"
+        "navigate"
+            | "back"
+            | "forward"
+            | "reload"
+            | "click"
+            | "type"
+            | "press"
+            | "hover"
+            | "click_ref"
+            | "hover_ref"
+            | "fill_ref"
+            | "fill_form"
+            | "act"
     ) {
         let after_state = capture::capture_compact_page_state(page, false).await;
         let mut diff = state.diff.lock().unwrap();
@@ -343,7 +423,12 @@ async fn dispatch(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &D
     response
 }
 
-async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, state: &DaemonState) -> DaemonResponse {
+async fn dispatch_inner(
+    req: &DaemonRequest,
+    page: &Page,
+    logs: &DaemonLogs,
+    state: &DaemonState,
+) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
         "health" => DaemonResponse::success(
@@ -431,12 +516,10 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "set_checked" => {
-            match handlers::interaction::handle_set_checked(page, &req.params).await {
-                Ok(result) => DaemonResponse::success(req.id, result),
-                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-            }
-        }
+        "set_checked" => match handlers::interaction::handle_set_checked(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "drag" => match handlers::interaction::handle_drag(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -447,12 +530,10 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "upload_file" => {
-            match handlers::interaction::handle_upload_file(page, &req.params).await {
-                Ok(result) => DaemonResponse::success(req.id, result),
-                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-            }
-        }
+        "upload_file" => match handlers::interaction::handle_upload_file(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "screenshot" => match handlers::screenshot::handle_screenshot(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
@@ -461,7 +542,7 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
                 &msg,
                 json!({"retryHint": "Check selector is valid or try without --selector"}),
             ),
-        }
+        },
         "accessibility_tree" => {
             match handlers::inspect::handle_accessibility_tree(page, &req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),
@@ -519,7 +600,8 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
                 json!({"retryHint": "Check ref targets an input/textarea element"}),
             ),
         },
-        "assert" => match handlers::assert_cmd::handle_assert(page, logs, state, &req.params).await {
+        "assert" => match handlers::assert_cmd::handle_assert(page, logs, state, &req.params).await
+        {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -581,10 +663,12 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "debug_bundle" => match handlers::session::handle_debug_bundle(page, logs, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "debug_bundle" => {
+            match handlers::session::handle_debug_bundle(page, logs, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "visual_diff" => match handlers::visual_diff::handle_visual_diff(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -601,30 +685,40 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "mock_route" => match handlers::network_mock::handle_mock_route(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
-        "block_urls" => match handlers::network_mock::handle_block_urls(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
-        "clear_routes" => match handlers::network_mock::handle_clear_routes(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
-        "emulate_device" => match handlers::device::handle_emulate_device(page, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "mock_route" => {
+            match handlers::network_mock::handle_mock_route(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "block_urls" => {
+            match handlers::network_mock::handle_block_urls(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "clear_routes" => {
+            match handlers::network_mock::handle_clear_routes(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "emulate_device" => {
+            match handlers::device::handle_emulate_device(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "save_state" => match handlers::state_persist::handle_save_state(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "restore_state" => match handlers::state_persist::handle_restore_state(page, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "restore_state" => {
+            match handlers::state_persist::handle_restore_state(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "vault_save" => match handlers::auth_vault::handle_vault_save(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -641,10 +735,12 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "check_injection" => match handlers::advanced::handle_check_injection(page, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "check_injection" => {
+            match handlers::advanced::handle_check_injection(page, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "generate_test" => match handlers::codegen::handle_generate_test(state, &req.params) {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -653,7 +749,8 @@ async fn dispatch_inner(req: &DaemonRequest, page: &Page, logs: &DaemonLogs, sta
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "trace_start" => match handlers::traces::handle_trace_start(page, state, &req.params).await {
+        "trace_start" => match handlers::traces::handle_trace_start(page, state, &req.params).await
+        {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
