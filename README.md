@@ -14,18 +14,6 @@ curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.
 
 Downloads the binary + Chromium automatically. Works in CI.
 
-### npm
-
-```bash
-npm install -g @gsd-build/gsd-browser
-```
-
-### Cargo (from source)
-
-```bash
-cargo install gsd-browser
-```
-
 ### Pre-built binaries
 
 Download from [GitHub Releases](https://github.com/gsd-build/gsd-browser/releases):
