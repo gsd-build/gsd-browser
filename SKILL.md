@@ -651,13 +651,13 @@ max_entries = 500
 
 ### Environment Variables
 
-All config values can be overridden with `GSD_BROWSER_` prefix and `__` section separator:
+Supported config overrides use `GSD_BROWSER_<SECTION>_<FIELD>` naming:
 
 ```bash
-GSD_BROWSER_BROWSER__PATH=/usr/bin/chromium
-GSD_BROWSER_DAEMON__PORT=9223
-GSD_BROWSER_SCREENSHOT__QUALITY=90
-GSD_BROWSER_SETTLE__TIMEOUT_MS=1000
+GSD_BROWSER_BROWSER_PATH=/usr/bin/chromium
+GSD_BROWSER_DAEMON_PORT=9223
+GSD_BROWSER_SCREENSHOT_QUALITY=90
+GSD_BROWSER_SETTLE_TIMEOUT_MS=1000
 GSD_BROWSER_VAULT_KEY=your-encryption-key
 ```
 

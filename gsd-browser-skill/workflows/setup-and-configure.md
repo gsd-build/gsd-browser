@@ -12,14 +12,16 @@
 # One-liner (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
 
-# npm
-npm install -g @gsd-build/gsd-browser
+# Or from a repo checkout
+git clone https://github.com/gsd-build/gsd-browser.git
+cd gsd-browser
+cargo install --path cli
 
 # Verify
 gsd-browser daemon health
 ```
 
-The installer downloads the binary and Chromium automatically.
+The installer downloads the binary and reuses a system Chrome/Chromium when present. Otherwise it downloads Chromium automatically when Chrome for Testing is available for the platform.
 
 **Step 2: Configure browser path (if needed)**
 
@@ -34,7 +36,7 @@ path = "/path/to/chrome"
 TOML
 
 # Or via environment variable
-export GSD_BROWSER_BROWSER__PATH="/path/to/chrome"
+export GSD_BROWSER_BROWSER_PATH="/path/to/chrome"
 
 # Or via CLI flag (per-command)
 gsd-browser --browser-path "/path/to/chrome" navigate https://example.com
@@ -117,7 +119,7 @@ gsd-browser daemon start      # Explicit start (rarely needed)
 For CI pipelines, ensure headless mode and configure paths:
 
 ```bash
-export GSD_BROWSER_BROWSER__PATH=$(which chromium-browser)
+export GSD_BROWSER_BROWSER_PATH=$(which chromium-browser)
 gsd-browser navigate https://staging.example.com
 gsd-browser assert --checks '[{"kind": "text_visible", "text": "App loaded"}]'
 gsd-browser daemon stop

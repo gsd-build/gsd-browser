@@ -9,16 +9,19 @@ Native Rust browser automation CLI for AI agents. Controls Chrome/Chromium via C
 ```bash
 gsd-browser navigate https://example.com
 gsd-browser snapshot
-gsd-browser click-ref @v1:e3
+gsd-browser click-ref @v1:e1
 ```
 
 ### Installation
 
 ```bash
-npm install -g @gsd-build/gsd-browser
+curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+
+# or from a repo checkout
+cargo install --path cli
 ```
 
-Requires Chrome or Chromium installed on the system.
+Requires Chrome or Chromium. The installer reuses a system browser when present and downloads Chromium automatically where Chrome for Testing is available.
 
 ### Full Reference
 

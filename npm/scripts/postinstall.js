@@ -103,7 +103,10 @@ async function main() {
       console.error(
         `gsd-browser: failed to download binary.\n` +
         `  ${e2.message}\n` +
-        `  You can build from source: cargo install gsd-browser\n` +
+        `  You can build from a repo checkout:\n` +
+        `    git clone https://github.com/${REPO}.git\n` +
+        `    cd gsd-browser\n` +
+        `    cargo install --path cli\n` +
         `  Or use the installer: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash`
       );
       process.exit(1);
