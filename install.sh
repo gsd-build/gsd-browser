@@ -95,6 +95,45 @@ download_binary() {
   ok "Binary installed: $target"
 }
 
+detect_existing_chrome() {
+  # Check standard Chrome/Chromium locations — mirrors find_chrome() in common/src/chrome.rs
+  local candidates=()
+
+  case "$(uname -s)" in
+    Darwin)
+      candidates=(
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+      )
+      ;;
+    Linux)
+      candidates=(
+        "/usr/bin/google-chrome"
+        "/usr/bin/google-chrome-stable"
+        "/usr/bin/chromium-browser"
+        "/usr/bin/chromium"
+        "/snap/bin/chromium"
+      )
+      ;;
+  esac
+
+  for path in "${candidates[@]}"; do
+    if [ -x "$path" ]; then
+      echo "$path"
+      return 0
+    fi
+  done
+
+  # Check PATH
+  for name in google-chrome google-chrome-stable chromium-browser chromium; do
+    if command -v "$name" >/dev/null 2>&1; then
+      command -v "$name"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 download_chromium() {
   if [ -z "$CHROME_PLATFORM" ]; then
     warn "Chromium not available for $PLATFORM via Chrome for Testing"
@@ -102,7 +141,15 @@ download_chromium() {
     return
   fi
 
-  # Check if already installed
+  # Check if a system Chrome/Chromium is already available
+  local system_chrome
+  if system_chrome=$(detect_existing_chrome); then
+    ok "Found Chrome at: $system_chrome (skipping download)"
+    SKIP_CHROMIUM_CONFIG=1
+    return
+  fi
+
+  # Check if we previously downloaded Chrome for Testing
   if [ -f "$CHROMIUM_DIR/version" ]; then
     local existing
     existing=$(cat "$CHROMIUM_DIR/version")
@@ -200,6 +247,11 @@ setup_path() {
 }
 
 write_config() {
+  # If system Chrome was detected, no config needed — find_chrome() will discover it
+  if [ "${SKIP_CHROMIUM_CONFIG:-}" = "1" ]; then
+    return
+  fi
+
   # If we downloaded Chromium, write a config pointing to it
   if [ -f "$CHROMIUM_DIR/binary_path" ]; then
     local chrome_path

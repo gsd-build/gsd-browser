@@ -68,12 +68,12 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
     let _ = fs::remove_file(socket_path_for(session));
     let _ = fs::remove_file(pid_path_for(session));
 
-    // Find the daemon binary — it's the same binary we're running, as a sibling crate.
-    // In dev: target/debug/gsd-browser-daemon
-    // We locate it relative to the current executable.
-    let daemon_bin = find_daemon_binary()?;
+    // Spawn the daemon as a hidden subcommand of the current binary.
+    let exe = std::env::current_exe()
+        .map_err(|e| format!("cannot determine current executable: {e}"))?;
 
-    let mut cmd = std::process::Command::new(&daemon_bin);
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("_serve");
     if let Some(path) = browser_path {
         cmd.arg("--browser-path").arg(path);
     }
@@ -87,7 +87,7 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
         .stderr(std::process::Stdio::null());
 
     cmd.spawn()
-        .map_err(|e| format!("failed to start daemon ({:?}): {}", daemon_bin, e))?;
+        .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?;
 
     // Wait for socket to appear
     let result = wait_for_socket(session, Duration::from_secs(10)).await;
@@ -96,25 +96,6 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
     let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
 
     result
-}
-
-fn find_daemon_binary() -> Result<std::path::PathBuf, Box<dyn std::error::Error>> {
-    // Try relative to current exe first (works in cargo build layout)
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("gsd-browser-daemon");
-            if candidate.exists() {
-                return Ok(candidate);
-            }
-        }
-    }
-
-    // Try PATH
-    if let Ok(path) = which::which("gsd-browser-daemon") {
-        return Ok(path);
-    }
-
-    Err("cannot find gsd-browser-daemon binary. Run `cargo build --workspace` first.".into())
 }
 
 async fn wait_for_socket(session: Option<&str>, max_wait: Duration) -> Result<(), Box<dyn std::error::Error>> {
