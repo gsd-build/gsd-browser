@@ -293,6 +293,154 @@ verify() {
   }
 }
 
+SKILL_REPO_BASE="https://raw.githubusercontent.com/$REPO/main/gsd-browser-skill"
+SKILL_FILES=(
+  "SKILL.md"
+  "references/command-reference.md"
+  "references/snapshot-and-refs.md"
+  "references/semantic-intents.md"
+  "references/configuration.md"
+  "references/error-recovery.md"
+  "workflows/scrape-and-extract.md"
+  "workflows/setup-and-configure.md"
+  "workflows/navigate-and-interact.md"
+  "workflows/test-and-assert.md"
+  "workflows/debug-and-diagnose.md"
+)
+
+install_skill_to() {
+  local dest="$1"
+  mkdir -p "$dest" "$dest/references" "$dest/workflows"
+
+  local failed=0
+  for file in "${SKILL_FILES[@]}"; do
+    if ! curl -fsSL -o "$dest/$file" "$SKILL_REPO_BASE/$file" 2>/dev/null; then
+      failed=1
+      break
+    fi
+  done
+
+  if [ "$failed" -eq 1 ]; then
+    warn "Failed to download skill files — check network or repo access"
+    rm -rf "$dest"
+    return 1
+  fi
+
+  ok "Skill installed: $dest"
+  return 0
+}
+
+install_skill() {
+  echo ""
+  printf "  ${cyan}${bold}AI Agent Skill Installation${reset}\n"
+  printf "  ${dim}Install the gsd-browser skill so your AI coding agent knows how to use it${reset}\n"
+  echo ""
+
+  # Detect available AI CLIs
+  local available=()
+  local labels=()
+
+  if command -v claude >/dev/null 2>&1; then
+    available+=("claude")
+    labels+=("Claude Code")
+  fi
+  if command -v codex >/dev/null 2>&1; then
+    available+=("codex")
+    labels+=("OpenAI Codex CLI")
+  fi
+  if command -v gemini >/dev/null 2>&1; then
+    available+=("gemini")
+    labels+=("Google Gemini CLI")
+  fi
+
+  if [ ${#available[@]} -eq 0 ]; then
+    info "No AI coding agents detected (claude, codex, gemini)"
+    info "Install one, then re-run: gsd-browser skill install"
+    return
+  fi
+
+  printf "  Detected AI agents:\n"
+  local idx=1
+  for label in "${labels[@]}"; do
+    printf "    ${bold}%d)${reset} %s\n" "$idx" "$label"
+    idx=$((idx + 1))
+  done
+  printf "    ${bold}a)${reset} All detected agents\n"
+  printf "    ${bold}s)${reset} Skip\n"
+  echo ""
+
+  local choice
+  read -rp "  Install skill for which agent(s)? [a]: " choice < /dev/tty || choice="a"
+  choice="${choice:-a}"
+
+  if [ "$choice" = "s" ] || [ "$choice" = "S" ]; then
+    info "Skipping skill installation"
+    return
+  fi
+
+  # Build list of selected tools
+  local selected=()
+  if [ "$choice" = "a" ] || [ "$choice" = "A" ]; then
+    selected=("${available[@]}")
+  else
+    # Parse comma-separated or single number
+    IFS=',' read -ra nums <<< "$choice"
+    for num in "${nums[@]}"; do
+      num=$(echo "$num" | tr -d ' ')
+      if [[ "$num" =~ ^[0-9]+$ ]] && [ "$num" -ge 1 ] && [ "$num" -le ${#available[@]} ]; then
+        selected+=("${available[$((num - 1))]}")
+      fi
+    done
+  fi
+
+  if [ ${#selected[@]} -eq 0 ]; then
+    warn "No valid selection — skipping skill installation"
+    return
+  fi
+
+  # Ask scope
+  echo ""
+  printf "  Install scope:\n"
+  printf "    ${bold}g)${reset} Global (available in all projects)\n"
+  printf "    ${bold}l)${reset} Local  (current directory only)\n"
+  echo ""
+  local scope
+  read -rp "  Scope? [g]: " scope < /dev/tty || scope="g"
+  scope="${scope:-g}"
+
+  for tool in "${selected[@]}"; do
+    local dest=""
+    case "$tool" in
+      claude)
+        if [ "$scope" = "l" ] || [ "$scope" = "L" ]; then
+          dest=".claude/skills/gsd-browser"
+        else
+          dest="$HOME/.claude/skills/gsd-browser"
+        fi
+        ;;
+      codex)
+        if [ "$scope" = "l" ] || [ "$scope" = "L" ]; then
+          dest=".codex/skills/gsd-browser"
+        else
+          dest="$HOME/.codex/skills/gsd-browser"
+        fi
+        ;;
+      gemini)
+        if [ "$scope" = "l" ] || [ "$scope" = "L" ]; then
+          dest=".gemini/skills/gsd-browser"
+        else
+          dest="$HOME/.gemini/skills/gsd-browser"
+        fi
+        ;;
+    esac
+
+    if [ -n "$dest" ]; then
+      info "Installing skill for $tool → $dest"
+      install_skill_to "$dest"
+    fi
+  done
+}
+
 main() {
   banner
   detect_platform
@@ -303,6 +451,7 @@ main() {
   setup_path
   write_config
   verify
+  install_skill
 
   echo ""
   printf "  ${green}${bold}Installation complete!${reset}\n"
