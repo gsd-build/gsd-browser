@@ -2,10 +2,10 @@
 set -euo pipefail
 
 # gsd-browser installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/glittercowboy/gsd-browser/main/install.sh | bash
+# Usage: curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
 
 VERSION="${GSD_BROWSER_VERSION:-latest}"
-REPO="glittercowboy/gsd-browser"
+REPO="gsd-build/gsd-browser"
 INSTALL_DIR="${GSD_BROWSER_DIR:-$HOME/.gsd-browser}"
 BIN_DIR="$INSTALL_DIR/bin"
 CHROMIUM_DIR="$INSTALL_DIR/chromium"
@@ -45,8 +45,7 @@ detect_platform() {
   case "$os" in
     Darwin) os="darwin" ;;
     Linux)  os="linux"  ;;
-    MINGW*|MSYS*|CYGWIN*) os="win" ;;
-    *) fail "Unsupported OS: $os" ;;
+    *) fail "Unsupported OS: $os (Windows users: use WSL)" ;;
   esac
 
   case "$arch" in
@@ -63,7 +62,6 @@ detect_platform() {
     darwin-x64)   CHROME_PLATFORM="mac-x64"   ;;
     linux-x64)    CHROME_PLATFORM="linux64"    ;;
     linux-arm64)  CHROME_PLATFORM=""           ;; # Not available
-    win-x64)      CHROME_PLATFORM="win64"      ;;
     *) CHROME_PLATFORM="" ;;
   esac
 }
@@ -82,14 +80,12 @@ resolve_version() {
 download_binary() {
   local url filename
   filename="gsd-browser-${PLATFORM}"
-  [ "$PLATFORM" = "win-x64" ] && filename="${filename}.exe"
   url="https://github.com/$REPO/releases/download/v${VERSION}/${filename}"
 
   info "Downloading gsd-browser for $PLATFORM..."
   mkdir -p "$BIN_DIR"
 
   local target="$BIN_DIR/gsd-browser"
-  [ "$PLATFORM" = "win-x64" ] && target="${target}.exe"
 
   if ! curl -fsSL -o "$target" "$url"; then
     fail "Download failed: $url"
@@ -162,9 +158,6 @@ for entry in data['channels']['Stable']['downloads']['chrome']:
       ;;
     linux64)
       chrome_bin=$(find "$CHROMIUM_DIR" -name "chrome" -type f 2>/dev/null | head -1)
-      ;;
-    win64)
-      chrome_bin=$(find "$CHROMIUM_DIR" -name "chrome.exe" -type f 2>/dev/null | head -1)
       ;;
   esac
 

@@ -6,14 +6,13 @@ const path = require("path");
 const https = require("https");
 const { execSync } = require("child_process");
 
-const REPO = "glittercowboy/gsd-browser";
+const REPO = "gsd-build/gsd-browser";
 
 const PLATFORM_MAP = {
   "darwin-arm64": "gsd-browser-darwin-arm64",
   "darwin-x64": "gsd-browser-darwin-x64",
   "linux-arm64": "gsd-browser-linux-arm64",
   "linux-x64": "gsd-browser-linux-x64",
-  "win32-x64": "gsd-browser-win-x64.exe",
 };
 
 function fetchJSON(url) {
