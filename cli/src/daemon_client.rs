@@ -1,5 +1,8 @@
-use gsd_browser_common::{ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse};
+use gsd_browser_common::{
+    ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
+};
 use std::fs;
+use std::process::{Child, Stdio};
 use std::time::Duration;
 use tokio::net::UnixStream;
 use tokio::time::{sleep, timeout};
@@ -27,7 +30,10 @@ pub fn is_daemon_alive(session: Option<&str>) -> bool {
 
 /// Start the daemon process. Spawns the daemon binary in the background and
 /// waits for the socket to appear.
-pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn start_daemon(
+    browser_path: Option<&str>,
+    session: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     // Ensure state dir exists (and session subdir if needed)
     let sock = socket_path_for(session);
     if let Some(parent) = sock.parent() {
@@ -69,8 +75,8 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
     let _ = fs::remove_file(pid_path_for(session));
 
     // Spawn the daemon as a hidden subcommand of the current binary.
-    let exe = std::env::current_exe()
-        .map_err(|e| format!("cannot determine current executable: {e}"))?;
+    let exe =
+        std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
 
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg("_serve");
@@ -81,16 +87,24 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
         cmd.arg("--session").arg(name);
     }
 
-    // Detach: redirect stdio so parent doesn't hang
-    cmd.stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
+    // In debug mode, inherit daemon logs so startup failures are visible.
+    cmd.stdin(Stdio::null());
+    if std::env::var_os("GSD_BROWSER_DEBUG").is_some() {
+        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+    } else {
+        cmd.stdout(Stdio::null()).stderr(Stdio::null());
+    }
 
-    cmd.spawn()
+    let mut child = cmd
+        .spawn()
         .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?;
 
-    // Wait for socket to appear
-    let result = wait_for_socket(session, Duration::from_secs(10)).await;
+    // Wait for socket to appear and fail fast if the daemon exits during startup.
+    let result = wait_for_spawned_daemon(session, &mut child, Duration::from_secs(10)).await;
+    if result.is_err() {
+        let _ = fs::remove_file(socket_path_for(session));
+        let _ = fs::remove_file(pid_path_for(session));
+    }
 
     // Release lock
     let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
@@ -98,7 +112,10 @@ pub async fn start_daemon(browser_path: Option<&str>, session: Option<&str>) -> 
     result
 }
 
-async fn wait_for_socket(session: Option<&str>, max_wait: Duration) -> Result<(), Box<dyn std::error::Error>> {
+async fn wait_for_socket(
+    session: Option<&str>,
+    max_wait: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
     let sock = socket_path_for(session);
     let start = std::time::Instant::now();
     let poll_interval = Duration::from_millis(50);
@@ -114,7 +131,38 @@ async fn wait_for_socket(session: Option<&str>, max_wait: Duration) -> Result<()
     }
 
     Err(format!(
-        "daemon did not start within {}s — check logs with GSD_BROWSER_DEBUG=1",
+        "daemon did not start within {}s — re-run with GSD_BROWSER_DEBUG=1 for startup logs",
+        max_wait.as_secs()
+    )
+    .into())
+}
+
+async fn wait_for_spawned_daemon(
+    session: Option<&str>,
+    child: &mut Child,
+    max_wait: Duration,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let sock = socket_path_for(session);
+    let start = std::time::Instant::now();
+    let poll_interval = Duration::from_millis(50);
+
+    while start.elapsed() < max_wait {
+        if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
+            return Ok(());
+        }
+
+        if let Some(status) = child.try_wait()? {
+            return Err(format!(
+                "daemon exited during startup with status {status} — re-run with GSD_BROWSER_DEBUG=1 for startup logs"
+            )
+            .into());
+        }
+
+        sleep(poll_interval).await;
+    }
+
+    Err(format!(
+        "daemon did not start within {}s — re-run with GSD_BROWSER_DEBUG=1 for startup logs",
         max_wait.as_secs()
     )
     .into())
@@ -128,10 +176,7 @@ pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     }
 
     let pid_str = fs::read_to_string(&pid_file)?;
-    let pid: i32 = pid_str
-        .trim()
-        .parse()
-        .map_err(|_| "invalid PID file")?;
+    let pid: i32 = pid_str.trim().parse().map_err(|_| "invalid PID file")?;
 
     nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid),
@@ -193,9 +238,12 @@ async fn send_once(
     let req = DaemonRequest::new(1, method, params);
     let payload = serde_json::to_vec(&req)?;
 
-    timeout(Duration::from_secs(30), ipc::write_message(&mut stream, &payload))
-        .await
-        .map_err(|_| "timeout writing request to daemon")??;
+    timeout(
+        Duration::from_secs(30),
+        ipc::write_message(&mut stream, &payload),
+    )
+    .await
+    .map_err(|_| "timeout writing request to daemon")??;
 
     let raw = timeout(Duration::from_secs(30), ipc::read_message(&mut stream))
         .await
