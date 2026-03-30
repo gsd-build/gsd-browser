@@ -9,7 +9,7 @@ Built in Rust for speed and reliability. Designed for AI agents, CI pipelines, a
 ### One-liner (macOS / Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/glittercowboy/gsd-browser/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
 ```
 
 Downloads the binary + Chromium automatically. Works in CI.
@@ -28,7 +28,7 @@ cargo install gsd-browser
 
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/glittercowboy/gsd-browser/releases):
+Download from [GitHub Releases](https://github.com/gsd-build/gsd-browser/releases):
 
 | Platform | Binary |
 |----------|--------|
@@ -36,7 +36,6 @@ Download from [GitHub Releases](https://github.com/glittercowboy/gsd-browser/rel
 | macOS (Intel) | `gsd-browser-darwin-x64` |
 | Linux (ARM64) | `gsd-browser-linux-arm64` |
 | Linux (x64) | `gsd-browser-linux-x64` |
-| Windows (x64) | `gsd-browser-win-x64.exe` |
 
 ## Quick Start
 

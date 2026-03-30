@@ -25,9 +25,6 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: gsd-browser-linux-arm64
-          - target: x86_64-pc-windows-msvc
-            os: windows-latest
-            artifact: gsd-browser-win-x64.exe
 
     runs-on: ${{ matrix.os }}
 
@@ -86,4 +83,3 @@ jobs:
             artifacts/gsd-browser-darwin-x64/gsd-browser-darwin-x64
             artifacts/gsd-browser-linux-arm64/gsd-browser-linux-arm64
             artifacts/gsd-browser-linux-x64/gsd-browser-linux-x64
-            artifacts/gsd-browser-win-x64.exe/gsd-browser-win-x64.exe

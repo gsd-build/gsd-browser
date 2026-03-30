@@ -5,11 +5,11 @@
   "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/glittercowboy/gsd-browser.git"
+    "url": "https://github.com/gsd-build/gsd-browser.git"
   },
-  "homepage": "https://github.com/glittercowboy/gsd-browser",
+  "homepage": "https://github.com/gsd-build/gsd-browser",
   "bugs": {
-    "url": "https://github.com/glittercowboy/gsd-browser/issues"
+    "url": "https://github.com/gsd-build/gsd-browser/issues"
   },
   "keywords": [
     "browser",
@@ -30,8 +30,7 @@
   },
   "os": [
     "darwin",
-    "linux",
-    "win32"
+    "linux"
   ],
   "cpu": [
     "arm64",
