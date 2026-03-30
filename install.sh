@@ -137,7 +137,7 @@ detect_existing_chrome() {
 download_chromium() {
   if [ -z "$CHROME_PLATFORM" ]; then
     warn "Chromium not available for $PLATFORM via Chrome for Testing"
-    warn "Install Chrome/Chromium manually and set GSD_BROWSER_BROWSER__PATH"
+    warn "Install Chrome/Chromium manually and set GSD_BROWSER_BROWSER_PATH"
     return
   fi
 

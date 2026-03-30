@@ -47,19 +47,25 @@ max_entries = 500
 
 <environment_variables>
 
-All config values can be overridden with `GSD_BROWSER_` prefix. Use `__` as section separator:
+Supported environment variable overrides use `GSD_BROWSER_<SECTION>_<FIELD>` naming:
 
 | Variable | Equivalent config |
 |----------|------------------|
-| `GSD_BROWSER_BROWSER__PATH` | `browser.path` |
-| `GSD_BROWSER_BROWSER__HEADLESS` | `browser.headless` |
-| `GSD_BROWSER_DAEMON__PORT` | `daemon.port` |
-| `GSD_BROWSER_DAEMON__HOST` | `daemon.host` |
-| `GSD_BROWSER_SCREENSHOT__QUALITY` | `screenshot.quality` |
-| `GSD_BROWSER_SCREENSHOT__FORMAT` | `screenshot.format` |
-| `GSD_BROWSER_SETTLE__TIMEOUT_MS` | `settle.timeout_ms` |
-| `GSD_BROWSER_ARTIFACTS__DIR` | `artifacts.dir` |
-| `GSD_BROWSER_VAULT_KEY` | Vault encryption key (no section separator) |
+| `GSD_BROWSER_BROWSER_PATH` | `browser.path` |
+| `GSD_BROWSER_BROWSER_HEADLESS` | `browser.headless` |
+| `GSD_BROWSER_DAEMON_PORT` | `daemon.port` |
+| `GSD_BROWSER_DAEMON_HOST` | `daemon.host` |
+| `GSD_BROWSER_SCREENSHOT_QUALITY` | `screenshot.quality` |
+| `GSD_BROWSER_SCREENSHOT_FORMAT` | `screenshot.format` |
+| `GSD_BROWSER_SCREENSHOT_FULL_PAGE` | `screenshot.full_page` |
+| `GSD_BROWSER_SETTLE_TIMEOUT_MS` | `settle.timeout_ms` |
+| `GSD_BROWSER_SETTLE_POLL_MS` | `settle.poll_ms` |
+| `GSD_BROWSER_SETTLE_QUIET_WINDOW_MS` | `settle.quiet_window_ms` |
+| `GSD_BROWSER_LOGS_MAX_BUFFER_SIZE` | `logs.max_buffer_size` |
+| `GSD_BROWSER_ARTIFACTS_DIR` | `artifacts.dir` |
+| `GSD_BROWSER_TIMELINE_ENABLED` | `timeline.enabled` |
+| `GSD_BROWSER_TIMELINE_MAX_ENTRIES` | `timeline.max_entries` |
+| `GSD_BROWSER_VAULT_KEY` | Vault encryption key |
 
 </environment_variables>
 
