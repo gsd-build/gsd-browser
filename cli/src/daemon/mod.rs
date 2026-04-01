@@ -143,8 +143,19 @@ async fn run_daemon(
         chrome_path
     );
 
+    // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
+    // Clean it up proactively before launch.
+    let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
+    let lock = runner_dir.join("SingletonLock");
+    if lock.exists() {
+        warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
+        let _ = fs::remove_file(&lock);
+        let _ = fs::remove_dir_all(&runner_dir);
+    }
+
     let config = BrowserConfig::builder()
         .chrome_executable(chrome_path)
+        .window_size(1920, 1080)
         .build()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
