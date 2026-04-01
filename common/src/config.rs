@@ -45,7 +45,7 @@ pub struct BrowserConfig {
     pub path: Option<String>,
     /// Extra arguments passed to Chrome on launch.
     pub args: Vec<String>,
-    /// Whether to launch headless (default: true).
+    /// Whether to launch headless (default: false — visible by default).
     pub headless: bool,
 }
 
@@ -54,7 +54,7 @@ impl Default for BrowserConfig {
         Self {
             path: None,
             args: Vec::new(),
-            headless: true,
+            headless: false,
         }
     }
 }
@@ -239,10 +239,7 @@ impl Config {
         let partial: Config = match toml::from_str(&contents) {
             Ok(c) => c,
             Err(e) => {
-                warn!(
-                    "[config] failed to deserialize {} config: {}",
-                    label, e
-                );
+                warn!("[config] failed to deserialize {} config: {}", label, e);
                 return;
             }
         };
@@ -384,7 +381,7 @@ mod tests {
 
         // Browser
         assert!(config.browser.path.is_none());
-        assert!(config.browser.headless);
+        assert!(!config.browser.headless);
 
         // Timeline
         assert!(config.timeline.enabled);
@@ -434,7 +431,7 @@ timeout_ms = 1000
 
         // Sections not in the file remain unchanged
         assert_eq!(config.logs.max_buffer_size, 1000);
-        assert!(config.browser.headless);
+        assert!(!config.browser.headless);
     }
 
     #[test]
@@ -492,10 +489,7 @@ quality = 90
         assert_eq!(config.screenshot.quality, 42);
         assert_eq!(config.settle.timeout_ms, 2000);
         assert_eq!(config.logs.max_buffer_size, 500);
-        assert_eq!(
-            config.browser.path.as_deref(),
-            Some("/usr/bin/chromium")
-        );
+        assert_eq!(config.browser.path.as_deref(), Some("/usr/bin/chromium"));
 
         // Clean up
         std::env::remove_var("GSD_BROWSER_SCREENSHOT_QUALITY");
