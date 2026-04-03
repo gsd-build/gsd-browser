@@ -1,3 +1,4 @@
+use fd_lock::RwLock;
 use gsd_browser_common::{
     ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
 };
@@ -24,8 +25,15 @@ pub fn is_daemon_alive(session: Option<&str>) -> bool {
         Err(_) => return false,
     };
 
-    // Check process alive via kill(pid, 0)
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    // Check process alive via platform-specific method
+    #[cfg(unix)]
+    {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        is_process_alive_windows(pid as u32)
+    }
 }
 
 /// Start the daemon process. Spawns the daemon binary in the background and
@@ -52,62 +60,58 @@ pub async fn start_daemon(
         .truncate(false)
         .open(&lock_file)?;
 
-    // Try to acquire exclusive lock (non-blocking first)
-    use std::os::unix::io::AsRawFd;
-    let fd = lock_fd.as_raw_fd();
-    let lock_result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    let mut flock = RwLock::new(lock_fd);
+    let mut child = match flock.try_write() {
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            // Another process is starting the daemon — wait for socket
+            eprintln!("[gsd-browser] waiting for daemon start by another process...");
+            return wait_for_socket(session, Duration::from_secs(10)).await;
+        }
+        Err(e) => return Err(e.into()),
+        Ok(_guard) => {
+            // We hold the lock (RAII — _guard drops at end of this block)
+            if is_daemon_alive(session) && sock.exists() {
+                return Ok(());
+            }
 
-    if lock_result != 0 {
-        // Another process is starting the daemon — wait for socket
-        eprintln!("[gsd-browser] waiting for daemon start by another process...");
-        return wait_for_socket(session, Duration::from_secs(10)).await;
-    }
+            // Clean up stale files
+            let _ = fs::remove_file(socket_path_for(session));
+            let _ = fs::remove_file(pid_path_for(session));
 
-    // We hold the lock — check if daemon is already alive
-    if is_daemon_alive(session) && sock.exists() {
-        // Already running — release lock and return
-        let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
-        return Ok(());
-    }
+            // Spawn the daemon as a hidden subcommand of the current binary.
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot determine current executable: {e}"))?;
 
-    // Clean up stale files
-    let _ = fs::remove_file(socket_path_for(session));
-    let _ = fs::remove_file(pid_path_for(session));
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("_serve");
+            if let Some(path) = browser_path {
+                cmd.arg("--browser-path").arg(path);
+            }
+            if let Some(name) = session {
+                cmd.arg("--session").arg(name);
+            }
 
-    // Spawn the daemon as a hidden subcommand of the current binary.
-    let exe =
-        std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
+            // In debug mode, inherit daemon logs so startup failures are visible.
+            cmd.stdin(Stdio::null());
+            if std::env::var_os("GSD_BROWSER_DEBUG").is_some() {
+                cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            } else {
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            }
 
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("_serve");
-    if let Some(path) = browser_path {
-        cmd.arg("--browser-path").arg(path);
-    }
-    if let Some(name) = session {
-        cmd.arg("--session").arg(name);
-    }
-
-    // In debug mode, inherit daemon logs so startup failures are visible.
-    cmd.stdin(Stdio::null());
-    if std::env::var_os("GSD_BROWSER_DEBUG").is_some() {
-        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    } else {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?;
+            cmd.spawn()
+                .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?
+            // _guard drops here, releasing the lock BEFORE any .await
+        }
+    };
 
     // Wait for socket to appear and fail fast if the daemon exits during startup.
+    // NOTE: _guard has already been dropped above — no Send issue with the await here.
     let result = wait_for_spawned_daemon(session, &mut child, Duration::from_secs(10)).await;
     if result.is_err() {
         let _ = fs::remove_file(socket_path_for(session));
         let _ = fs::remove_file(pid_path_for(session));
     }
-
-    // Release lock
-    let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
 
     result
 }
@@ -168,7 +172,8 @@ async fn wait_for_spawned_daemon(
     .into())
 }
 
-/// Stop the daemon by sending SIGTERM to the PID in the pidfile.
+/// Stop the daemon by sending SIGTERM to the PID in the pidfile (Unix) or
+/// TerminateProcess (Windows).
 pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let pid_file = pid_path_for(session);
     if !pid_file.exists() {
@@ -178,17 +183,34 @@ pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     let pid_str = fs::read_to_string(&pid_file)?;
     let pid: i32 = pid_str.trim().parse().map_err(|_| "invalid PID file")?;
 
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
+    #[cfg(unix)]
+    {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
 
-    // Wait briefly for cleanup
-    std::thread::sleep(Duration::from_millis(500));
+        // Wait briefly for cleanup
+        std::thread::sleep(Duration::from_millis(500));
 
-    // Clean up if process is gone
-    if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
+        // Clean up if process is gone
+        if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
+            let _ = fs::remove_file(pid_path_for(session));
+            let _ = fs::remove_file(socket_path_for(session));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // TODO Phase 3: attempt graceful IPC shutdown via send_once("shutdown", ...)
+        // once gsd_browser_common::ipc is cross-platform. Currently skipped because
+        // ipc module is #[cfg(unix)] and Phase 2 precedes that change.
+        if is_daemon_alive(session) {
+            terminate_process_windows(pid as u32)
+                .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
+        }
+        std::thread::sleep(Duration::from_millis(500));
         let _ = fs::remove_file(pid_path_for(session));
         let _ = fs::remove_file(socket_path_for(session));
     }
@@ -256,4 +278,37 @@ async fn send_once(
 
     let resp: DaemonResponse = serde_json::from_slice(&raw)?;
     Ok(resp)
+}
+
+#[cfg(windows)]
+fn is_process_alive_windows(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        CloseHandle(handle);
+        true
+    }
+}
+
+#[cfg(windows)]
+fn terminate_process_windows(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return Err(format!("failed to open process {pid} for termination").into());
+        }
+        TerminateProcess(handle, 1);
+        CloseHandle(handle);
+    }
+    Ok(())
 }
