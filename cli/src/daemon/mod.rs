@@ -21,7 +21,6 @@ use state::DaemonState;
 use std::fs;
 use std::process;
 use std::sync::Arc;
-use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
 
 /// Entry point for the daemon server. Called when the binary is invoked
@@ -220,38 +219,81 @@ async fn run_daemon(
         pages.register(page_arc, String::new(), "about:blank".to_string());
     }
 
-    // Bind Unix socket
-    let listener = UnixListener::bind(&sock_path)?;
-    info!("[gsd-browser-daemon] listening on {:?}", sock_path);
-
     // Trap termination signals so `daemon stop` can shut Chrome down cleanly.
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
 
-    loop {
-        tokio::select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((stream, _addr)) => {
-                        info!("[gsd-browser-daemon] connection accepted");
-                        let logs = Arc::clone(&daemon_logs);
-                        let state = Arc::clone(&daemon_state);
-                        tokio::spawn(handle_connection(stream, logs, state));
-                    }
-                    Err(e) => {
-                        error!("[gsd-browser-daemon] accept error: {e}");
+    #[cfg(unix)]
+    {
+        use tokio::net::UnixListener;
+
+        let listener = UnixListener::bind(&sock_path)?;
+        info!("[gsd-browser-daemon] listening on {:?}", sock_path);
+
+        loop {
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _addr)) => {
+                            info!("[gsd-browser-daemon] connection accepted");
+                            let logs = Arc::clone(&daemon_logs);
+                            let state = Arc::clone(&daemon_state);
+                            tokio::spawn(handle_connection(stream, logs, state));
+                        }
+                        Err(e) => {
+                            error!("[gsd-browser-daemon] accept error: {e}");
+                        }
                     }
                 }
+                _ = &mut shutdown => {
+                    info!("[gsd-browser-daemon] shutting down...");
+                    break;
+                }
             }
-            _ = &mut shutdown => {
-                info!("[gsd-browser-daemon] shutting down...");
-                break;
+        }
+
+        drop(listener);
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&sock_path)?;
+        info!("[gsd-browser-daemon] listening on {:?}", sock_path);
+
+        loop {
+            tokio::select! {
+                result = server.connect() => {
+                    match result {
+                        Ok(()) => {
+                            info!("[gsd-browser-daemon] connection accepted");
+                            let connected = server;
+
+                            // CRITICAL: Create next instance BEFORE spawning handler.
+                            // This prevents NotFound errors when clients connect (D-06).
+                            server = ServerOptions::new().create(&sock_path)?;
+
+                            let logs = Arc::clone(&daemon_logs);
+                            let state = Arc::clone(&daemon_state);
+                            tokio::spawn(handle_connection(connected, logs, state));
+                        }
+                        Err(e) => {
+                            error!("[gsd-browser-daemon] accept error: {e}");
+                        }
+                    }
+                }
+                _ = &mut shutdown => {
+                    info!("[gsd-browser-daemon] shutting down...");
+                    break;
+                }
             }
         }
     }
 
     // Clean shutdown
-    drop(listener);
     let _ = browser.close().await;
     let _ = browser.wait().await;
     handler_task.abort();
@@ -262,8 +304,8 @@ async fn run_daemon(
     Ok(())
 }
 
-async fn handle_connection(
-    mut stream: tokio::net::UnixStream,
+async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(
+    mut stream: S,
     logs: Arc<DaemonLogs>,
     state: Arc<DaemonState>,
 ) {
