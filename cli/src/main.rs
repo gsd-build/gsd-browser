@@ -1,4 +1,6 @@
+#[cfg(unix)]
 mod daemon;
+#[cfg(unix)]
 mod daemon_client;
 mod output;
 
@@ -597,28 +599,76 @@ async fn main() {
         cli.browser_path = config.browser.path.clone();
     }
 
-    let result = match &cli.command {
+    let result: CmdResult = match &cli.command {
         Commands::Serve { browser_path, session } => {
-            if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
-                eprintln!("[gsd-browser-daemon] fatal: {e}");
+            #[cfg(unix)]
+            {
+                if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
+                    eprintln!("[gsd-browser-daemon] fatal: {e}");
+                    std::process::exit(1);
+                }
+                Ok(())
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = (browser_path, session);
+                eprintln!("error: daemon mode is not yet supported on this platform. Windows support coming in a future release.");
                 std::process::exit(1);
             }
-            Ok(())
         }
-        Commands::Daemon { cmd } => match cmd {
-            DaemonCmd::Start => cmd_daemon_start(&cli).await,
-            DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
-            DaemonCmd::Health => cmd_daemon_health(&cli).await,
-        },
+        Commands::Daemon { cmd } => {
+            #[cfg(unix)]
+            {
+                match cmd {
+                    DaemonCmd::Start => cmd_daemon_start(&cli).await,
+                    DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
+                    DaemonCmd::Health => cmd_daemon_health(&cli).await,
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = cmd;
+                eprintln!("error: daemon commands are not yet supported on this platform. Windows support coming in a future release.");
+                std::process::exit(1);
+            }
+        }
+        #[cfg(unix)]
         Commands::Navigate { url, .. } => cmd_navigate(&cli, url).await,
+        #[cfg(not(unix))]
+        Commands::Navigate { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Back => cmd_back(&cli).await,
+        #[cfg(not(unix))]
+        Commands::Back => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Forward => cmd_forward(&cli).await,
+        #[cfg(not(unix))]
+        Commands::Forward => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Reload => cmd_reload(&cli).await,
+        #[cfg(not(unix))]
+        Commands::Reload => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Console { no_clear } => cmd_console(&cli, *no_clear).await,
+        #[cfg(not(unix))]
+        Commands::Console { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Network { no_clear, filter } => cmd_network(&cli, *no_clear, filter).await,
+        #[cfg(not(unix))]
+        Commands::Network { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Dialog { no_clear } => cmd_dialog(&cli, *no_clear).await,
+        #[cfg(not(unix))]
+        Commands::Dialog { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Eval { expression } => cmd_eval(&cli, expression).await,
+        #[cfg(not(unix))]
+        Commands::Eval { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Click { selector, x, y } => cmd_click(&cli, selector.as_deref(), *x, *y).await,
+        #[cfg(not(unix))]
+        Commands::Click { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Type {
             selector,
             text,
@@ -626,22 +676,49 @@ async fn main() {
             clear_first,
             submit,
         } => cmd_type(&cli, selector, text, *slowly, *clear_first, *submit).await,
+        #[cfg(not(unix))]
+        Commands::Type { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Press { key } => cmd_press(&cli, key).await,
+        #[cfg(not(unix))]
+        Commands::Press { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Hover { selector } => cmd_hover(&cli, selector).await,
+        #[cfg(not(unix))]
+        Commands::Hover { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Scroll { direction, amount } => cmd_scroll(&cli, direction, *amount).await,
+        #[cfg(not(unix))]
+        Commands::Scroll { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SelectOption { selector, option } => {
             cmd_select_option(&cli, selector, option).await
         }
+        #[cfg(not(unix))]
+        Commands::SelectOption { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SetChecked { selector, checked } => {
             cmd_set_checked(&cli, selector, *checked).await
         }
+        #[cfg(not(unix))]
+        Commands::SetChecked { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Drag { source, target } => cmd_drag(&cli, source, target).await,
+        #[cfg(not(unix))]
+        Commands::Drag { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SetViewport {
             preset,
             width,
             height,
         } => cmd_set_viewport(&cli, preset.as_deref(), *width, *height).await,
+        #[cfg(not(unix))]
+        Commands::SetViewport { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::UploadFile { selector, files } => cmd_upload_file(&cli, selector, files).await,
+        #[cfg(not(unix))]
+        Commands::UploadFile { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Screenshot {
             selector,
             full_page,
@@ -659,34 +736,64 @@ async fn main() {
             )
             .await
         }
+        #[cfg(not(unix))]
+        Commands::Screenshot { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::AccessibilityTree {
             selector,
             max_depth,
             max_count,
         } => cmd_accessibility_tree(&cli, selector.as_deref(), *max_depth, *max_count).await,
+        #[cfg(not(unix))]
+        Commands::AccessibilityTree { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Find {
             role,
             text,
             selector,
             limit,
         } => cmd_find(&cli, role.as_deref(), text.as_deref(), selector.as_deref(), *limit).await,
+        #[cfg(not(unix))]
+        Commands::Find { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::PageSource { selector } => cmd_page_source(&cli, selector.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::PageSource { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::WaitFor {
             condition,
             value,
             threshold,
             timeout,
         } => cmd_wait_for(&cli, condition, value.as_deref(), threshold.as_deref(), *timeout).await,
+        #[cfg(not(unix))]
+        Commands::WaitFor { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Timeline { write_to_disk } => cmd_timeline(&cli, *write_to_disk).await,
+        #[cfg(not(unix))]
+        Commands::Timeline { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Snapshot {
             selector,
             interactive_only,
             limit,
             mode,
         } => cmd_snapshot(&cli, selector.as_deref(), *interactive_only, *limit, mode.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::Snapshot { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::GetRef { ref_str } => cmd_get_ref(&cli, ref_str).await,
+        #[cfg(not(unix))]
+        Commands::GetRef { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ClickRef { ref_str } => cmd_click_ref(&cli, ref_str).await,
+        #[cfg(not(unix))]
+        Commands::ClickRef { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::HoverRef { ref_str } => cmd_hover_ref(&cli, ref_str).await,
+        #[cfg(not(unix))]
+        Commands::HoverRef { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::FillRef {
             ref_str,
             text,
@@ -694,42 +801,90 @@ async fn main() {
             submit,
             slowly,
         } => cmd_fill_ref(&cli, ref_str, text, *clear_first, *submit, *slowly).await,
+        #[cfg(not(unix))]
+        Commands::FillRef { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Assert { checks } => cmd_assert(&cli, checks).await,
+        #[cfg(not(unix))]
+        Commands::Assert { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Diff { since } => cmd_diff(&cli, *since).await,
+        #[cfg(not(unix))]
+        Commands::Diff { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Batch {
             steps,
             stop_on_failure,
             summary_only,
         } => cmd_batch(&cli, steps, *stop_on_failure, *summary_only).await,
+        #[cfg(not(unix))]
+        Commands::Batch { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ListPages => cmd_list_pages(&cli).await,
+        #[cfg(not(unix))]
+        Commands::ListPages => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SwitchPage { id } => cmd_switch_page(&cli, *id).await,
+        #[cfg(not(unix))]
+        Commands::SwitchPage { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ClosePage { id } => cmd_close_page(&cli, *id).await,
+        #[cfg(not(unix))]
+        Commands::ClosePage { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ListFrames => cmd_list_frames(&cli).await,
+        #[cfg(not(unix))]
+        Commands::ListFrames => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SelectFrame {
             name,
             index,
             url_pattern,
         } => cmd_select_frame(&cli, name.as_deref(), *index, url_pattern.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::SelectFrame { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::AnalyzeForm { selector } => {
             cmd_analyze_form(&cli, selector.as_deref()).await
         }
+        #[cfg(not(unix))]
+        Commands::AnalyzeForm { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::FillForm {
             values,
             selector,
             submit,
         } => cmd_fill_form(&cli, values, selector.as_deref(), *submit).await,
+        #[cfg(not(unix))]
+        Commands::FillForm { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::FindBest { intent, scope } => {
             cmd_find_best(&cli, intent, scope.as_deref()).await
         }
+        #[cfg(not(unix))]
+        Commands::FindBest { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::Act { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SessionSummary => cmd_session_summary(&cli).await,
+        #[cfg(not(unix))]
+        Commands::SessionSummary => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::DebugBundle { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::VisualDiff {
             name,
             selector,
             threshold,
             update_baseline,
         } => cmd_visual_diff(&cli, name.as_deref(), selector.as_deref(), *threshold, *update_baseline).await,
+        #[cfg(not(unix))]
+        Commands::VisualDiff { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ZoomRegion {
             x,
             y,
@@ -737,17 +892,26 @@ async fn main() {
             height,
             scale,
         } => cmd_zoom_region(&cli, *x, *y, *width, *height, *scale).await,
+        #[cfg(not(unix))]
+        Commands::ZoomRegion { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SavePdf {
             format,
             print_background,
             filename,
             output,
         } => cmd_save_pdf(&cli, format, *print_background, filename.as_deref(), output.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::SavePdf { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::Extract {
             schema,
             selector,
             multiple,
         } => cmd_extract(&cli, schema, selector.as_deref(), *multiple).await,
+        #[cfg(not(unix))]
+        Commands::Extract { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::MockRoute {
             url,
             status,
@@ -756,11 +920,29 @@ async fn main() {
             delay,
             headers,
         } => cmd_mock_route(&cli, url, *status, body.as_deref(), content_type.as_deref(), *delay, headers.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::MockRoute { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::BlockUrls { patterns } => cmd_block_urls(&cli, patterns).await,
+        #[cfg(not(unix))]
+        Commands::BlockUrls { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ClearRoutes => cmd_clear_routes(&cli).await,
+        #[cfg(not(unix))]
+        Commands::ClearRoutes => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::EmulateDevice { device } => cmd_emulate_device(&cli, device).await,
+        #[cfg(not(unix))]
+        Commands::EmulateDevice { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::SaveState { name } => cmd_save_state(&cli, &name).await,
+        #[cfg(not(unix))]
+        Commands::SaveState { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::RestoreState { name } => cmd_restore_state(&cli, &name).await,
+        #[cfg(not(unix))]
+        Commands::RestoreState { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::VaultSave {
             profile,
             url,
@@ -768,25 +950,51 @@ async fn main() {
             password,
             extra_fields,
         } => cmd_vault_save(&cli, &profile, &url, &username, &password, extra_fields.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::VaultSave { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::VaultLogin { profile } => cmd_vault_login(&cli, &profile).await,
+        #[cfg(not(unix))]
+        Commands::VaultLogin { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::VaultList => cmd_vault_list(&cli).await,
+        #[cfg(not(unix))]
+        Commands::VaultList => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::ActionCache {
             action,
             intent,
             selector,
             score,
         } => cmd_action_cache(&cli, &action, intent.as_deref(), selector.as_deref(), *score).await,
+        #[cfg(not(unix))]
+        Commands::ActionCache { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::CheckInjection { include_hidden } => {
             cmd_check_injection(&cli, *include_hidden).await
         }
+        #[cfg(not(unix))]
+        Commands::CheckInjection { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::GenerateTest {
             name,
             output,
             include_assertions,
         } => cmd_generate_test(&cli, &name, output.as_deref(), *include_assertions).await,
+        #[cfg(not(unix))]
+        Commands::GenerateTest { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::HarExport { filename } => cmd_har_export(&cli, filename.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::HarExport { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::TraceStart { name } => cmd_trace_start(&cli, name.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::TraceStart { .. } => { daemon_unsupported(); }
+        #[cfg(unix)]
         Commands::TraceStop { name } => cmd_trace_stop(&cli, name.as_deref()).await,
+        #[cfg(not(unix))]
+        Commands::TraceStop { .. } => { daemon_unsupported(); }
     };
 
     if let Err(e) = result {
@@ -807,6 +1015,13 @@ async fn main() {
 
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
 
+#[cfg(not(unix))]
+fn daemon_unsupported() -> ! {
+    eprintln!("error: this command requires the daemon, which is not yet supported on this platform. Windows support coming in a future release.");
+    std::process::exit(1);
+}
+
+#[cfg(unix)]
 async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
     daemon_client::start_daemon(cli.browser_path.as_deref(), cli.session.as_deref()).await?;
     if cli.json {
@@ -817,6 +1032,7 @@ async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn cmd_daemon_stop(cli: &Cli) -> CmdResult {
     daemon_client::stop_daemon(cli.session.as_deref())?;
     if cli.json {
@@ -827,6 +1043,7 @@ async fn cmd_daemon_stop(cli: &Cli) -> CmdResult {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("health", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -857,6 +1074,7 @@ async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
     Ok(())
 }
 
+#[cfg(unix)]
 async fn cmd_navigate(cli: &Cli, url: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "navigate",
@@ -868,6 +1086,7 @@ async fn cmd_navigate(cli: &Cli, url: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_navigate)
 }
 
+#[cfg(unix)]
 async fn cmd_back(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("back", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -875,6 +1094,7 @@ async fn cmd_back(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_back)
 }
 
+#[cfg(unix)]
 async fn cmd_forward(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("forward", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -882,6 +1102,7 @@ async fn cmd_forward(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_forward)
 }
 
+#[cfg(unix)]
 async fn cmd_reload(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("reload", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -889,6 +1110,7 @@ async fn cmd_reload(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_reload)
 }
 
+#[cfg(unix)]
 async fn cmd_console(cli: &Cli, no_clear: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "console",
@@ -900,6 +1122,7 @@ async fn cmd_console(cli: &Cli, no_clear: bool) -> CmdResult {
     handle_response(cli, resp, output::format_text_console)
 }
 
+#[cfg(unix)]
 async fn cmd_network(cli: &Cli, no_clear: bool, filter: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "network",
@@ -911,6 +1134,7 @@ async fn cmd_network(cli: &Cli, no_clear: bool, filter: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_network)
 }
 
+#[cfg(unix)]
 async fn cmd_dialog(cli: &Cli, no_clear: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "dialog",
@@ -922,6 +1146,7 @@ async fn cmd_dialog(cli: &Cli, no_clear: bool) -> CmdResult {
     handle_response(cli, resp, output::format_text_dialog)
 }
 
+#[cfg(unix)]
 async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "eval",
@@ -933,6 +1158,7 @@ async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_eval)
 }
 
+#[cfg(unix)]
 async fn cmd_click(cli: &Cli, selector: Option<&str>, x: Option<f64>, y: Option<f64>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(sel) = selector {
@@ -948,6 +1174,7 @@ async fn cmd_click(cli: &Cli, selector: Option<&str>, x: Option<f64>, y: Option<
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_type(
     cli: &Cli,
     selector: &str,
@@ -972,6 +1199,7 @@ async fn cmd_type(
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_press(cli: &Cli, key: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "press",
@@ -983,6 +1211,7 @@ async fn cmd_press(cli: &Cli, key: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_hover(cli: &Cli, selector: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "hover",
@@ -994,6 +1223,7 @@ async fn cmd_hover(cli: &Cli, selector: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_scroll(cli: &Cli, direction: &str, amount: i32) -> CmdResult {
     let resp = daemon_client::send_request(
         "scroll",
@@ -1005,6 +1235,7 @@ async fn cmd_scroll(cli: &Cli, direction: &str, amount: i32) -> CmdResult {
     handle_response(cli, resp, output::format_text_scroll)
 }
 
+#[cfg(unix)]
 async fn cmd_select_option(cli: &Cli, selector: &str, option: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "select_option",
@@ -1016,6 +1247,7 @@ async fn cmd_select_option(cli: &Cli, selector: &str, option: &str) -> CmdResult
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_set_checked(cli: &Cli, selector: &str, checked: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "set_checked",
@@ -1027,6 +1259,7 @@ async fn cmd_set_checked(cli: &Cli, selector: &str, checked: bool) -> CmdResult 
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_drag(cli: &Cli, source: &str, target: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "drag",
@@ -1038,6 +1271,7 @@ async fn cmd_drag(cli: &Cli, source: &str, target: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_set_viewport(
     cli: &Cli,
     preset: Option<&str>,
@@ -1059,6 +1293,7 @@ async fn cmd_set_viewport(
     handle_response(cli, resp, output::format_text_viewport)
 }
 
+#[cfg(unix)]
 async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResult {
     let resp = daemon_client::send_request(
         "upload_file",
@@ -1070,6 +1305,7 @@ async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResu
     handle_response(cli, resp, output::format_text_interaction)
 }
 
+#[cfg(unix)]
 async fn cmd_screenshot(
     cli: &Cli,
     selector: Option<&str>,
@@ -1128,6 +1364,7 @@ async fn cmd_screenshot(
     Ok(())
 }
 
+#[cfg(unix)]
 async fn cmd_accessibility_tree(
     cli: &Cli,
     selector: Option<&str>,
@@ -1146,6 +1383,7 @@ async fn cmd_accessibility_tree(
     handle_response(cli, resp, output::format_text_accessibility_tree)
 }
 
+#[cfg(unix)]
 async fn cmd_find(
     cli: &Cli,
     role: Option<&str>,
@@ -1168,6 +1406,7 @@ async fn cmd_find(
     handle_response(cli, resp, output::format_text_find)
 }
 
+#[cfg(unix)]
 async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(sel) = selector {
@@ -1178,6 +1417,7 @@ async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_page_source)
 }
 
+#[cfg(unix)]
 async fn cmd_wait_for(
     cli: &Cli,
     condition: &str,
@@ -1200,6 +1440,7 @@ async fn cmd_wait_for(
     handle_response(cli, resp, output::format_text_wait_for)
 }
 
+#[cfg(unix)]
 async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "timeline",
@@ -1211,6 +1452,7 @@ async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
     handle_response(cli, resp, output::format_text_timeline)
 }
 
+#[cfg(unix)]
 async fn cmd_snapshot(
     cli: &Cli,
     selector: Option<&str>,
@@ -1233,6 +1475,7 @@ async fn cmd_snapshot(
     handle_response(cli, resp, output::format_text_snapshot)
 }
 
+#[cfg(unix)]
 async fn cmd_get_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "get_ref",
@@ -1244,6 +1487,7 @@ async fn cmd_get_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_get_ref)
 }
 
+#[cfg(unix)]
 async fn cmd_click_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "click_ref",
@@ -1255,6 +1499,7 @@ async fn cmd_click_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_ref_action)
 }
 
+#[cfg(unix)]
 async fn cmd_hover_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "hover_ref",
@@ -1266,6 +1511,7 @@ async fn cmd_hover_ref(cli: &Cli, ref_str: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_ref_action)
 }
 
+#[cfg(unix)]
 async fn cmd_fill_ref(
     cli: &Cli,
     ref_str: &str,
@@ -1290,6 +1536,7 @@ async fn cmd_fill_ref(
     handle_response(cli, resp, output::format_text_ref_action)
 }
 
+#[cfg(unix)]
 async fn cmd_assert(cli: &Cli, checks: &str) -> CmdResult {
     // Parse the checks JSON to validate it before sending
     let checks_value: serde_json::Value =
@@ -1304,6 +1551,7 @@ async fn cmd_assert(cli: &Cli, checks: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_assert)
 }
 
+#[cfg(unix)]
 async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(id) = since {
@@ -1314,6 +1562,7 @@ async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
     handle_response(cli, resp, output::format_text_diff)
 }
 
+#[cfg(unix)]
 async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: bool) -> CmdResult {
     // Parse the steps JSON to validate it before sending
     let steps_value: serde_json::Value =
@@ -1332,6 +1581,7 @@ async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: 
     handle_response(cli, resp, output::format_text_batch)
 }
 
+#[cfg(unix)]
 async fn cmd_list_pages(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("list_pages", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -1339,6 +1589,7 @@ async fn cmd_list_pages(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_list_pages)
 }
 
+#[cfg(unix)]
 async fn cmd_switch_page(cli: &Cli, id: u64) -> CmdResult {
     let resp = daemon_client::send_request(
         "switch_page",
@@ -1350,6 +1601,7 @@ async fn cmd_switch_page(cli: &Cli, id: u64) -> CmdResult {
     handle_response(cli, resp, output::format_text_switch_page)
 }
 
+#[cfg(unix)]
 async fn cmd_close_page(cli: &Cli, id: u64) -> CmdResult {
     let resp = daemon_client::send_request(
         "close_page",
@@ -1361,6 +1613,7 @@ async fn cmd_close_page(cli: &Cli, id: u64) -> CmdResult {
     handle_response(cli, resp, output::format_text_close_page)
 }
 
+#[cfg(unix)]
 async fn cmd_list_frames(cli: &Cli) -> CmdResult {
     let resp =
         daemon_client::send_request("list_frames", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
@@ -1368,6 +1621,7 @@ async fn cmd_list_frames(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_list_frames)
 }
 
+#[cfg(unix)]
 async fn cmd_select_frame(
     cli: &Cli,
     name: Option<&str>,
@@ -1389,6 +1643,7 @@ async fn cmd_select_frame(
     handle_response(cli, resp, output::format_text_select_frame)
 }
 
+#[cfg(unix)]
 async fn cmd_analyze_form(cli: &Cli, selector: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(sel) = selector {
@@ -1399,6 +1654,7 @@ async fn cmd_analyze_form(cli: &Cli, selector: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_analyze_form)
 }
 
+#[cfg(unix)]
 async fn cmd_fill_form(cli: &Cli, values: &str, selector: Option<&str>, submit: bool) -> CmdResult {
     let values_value: serde_json::Value =
         serde_json::from_str(values).map_err(|e| format!("invalid values JSON: {e}"))?;
@@ -1414,6 +1670,7 @@ async fn cmd_fill_form(cli: &Cli, values: &str, selector: Option<&str>, submit: 
     handle_response(cli, resp, output::format_text_fill_form)
 }
 
+#[cfg(unix)]
 async fn cmd_find_best(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({"intent": intent});
     if let Some(s) = scope {
@@ -1424,6 +1681,7 @@ async fn cmd_find_best(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResul
     handle_response(cli, resp, output::format_text_find_best)
 }
 
+#[cfg(unix)]
 async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({"intent": intent});
     if let Some(s) = scope {
@@ -1434,6 +1692,7 @@ async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_act)
 }
 
+#[cfg(unix)]
 async fn cmd_session_summary(cli: &Cli) -> CmdResult {
     let resp = daemon_client::send_request(
         "session_summary",
@@ -1445,6 +1704,7 @@ async fn cmd_session_summary(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_session_summary)
 }
 
+#[cfg(unix)]
 async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(n) = name {
@@ -1460,6 +1720,7 @@ async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_debug_bundle)
 }
 
+#[cfg(unix)]
 async fn cmd_visual_diff(
     cli: &Cli,
     name: Option<&str>,
@@ -1483,6 +1744,7 @@ async fn cmd_visual_diff(
     handle_response(cli, resp, output::format_text_visual_diff)
 }
 
+#[cfg(unix)]
 async fn cmd_zoom_region(cli: &Cli, x: f64, y: f64, width: f64, height: f64, scale: f64) -> CmdResult {
     let resp = daemon_client::send_request(
         "zoom_region",
@@ -1500,6 +1762,7 @@ async fn cmd_zoom_region(cli: &Cli, x: f64, y: f64, width: f64, height: f64, sca
     handle_response(cli, resp, output::format_text_zoom_region)
 }
 
+#[cfg(unix)]
 async fn cmd_save_pdf(
     cli: &Cli,
     format: &str,
@@ -1521,6 +1784,7 @@ async fn cmd_save_pdf(
     handle_response(cli, resp, output::format_text_save_pdf)
 }
 
+#[cfg(unix)]
 async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: bool) -> CmdResult {
     let schema_value: serde_json::Value =
         serde_json::from_str(schema).map_err(|e| format!("invalid schema JSON: {e}"))?;
@@ -1535,6 +1799,7 @@ async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: 
     handle_response(cli, resp, output::format_text_extract)
 }
 
+#[cfg(unix)]
 async fn cmd_mock_route(
     cli: &Cli,
     url: &str,
@@ -1566,6 +1831,7 @@ async fn cmd_mock_route(
     handle_response(cli, resp, output::format_text_mock_route)
 }
 
+#[cfg(unix)]
 async fn cmd_block_urls(cli: &Cli, patterns: &[String]) -> CmdResult {
     let resp = daemon_client::send_request(
         "block_urls",
@@ -1577,6 +1843,7 @@ async fn cmd_block_urls(cli: &Cli, patterns: &[String]) -> CmdResult {
     handle_response(cli, resp, output::format_text_block_urls)
 }
 
+#[cfg(unix)]
 async fn cmd_clear_routes(cli: &Cli) -> CmdResult {
     let resp = daemon_client::send_request(
         "clear_routes",
@@ -1588,6 +1855,7 @@ async fn cmd_clear_routes(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_clear_routes)
 }
 
+#[cfg(unix)]
 async fn cmd_emulate_device(cli: &Cli, device: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "emulate_device",
@@ -1599,6 +1867,7 @@ async fn cmd_emulate_device(cli: &Cli, device: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_emulate_device)
 }
 
+#[cfg(unix)]
 async fn cmd_save_state(cli: &Cli, name: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "save_state",
@@ -1610,6 +1879,7 @@ async fn cmd_save_state(cli: &Cli, name: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_save_state)
 }
 
+#[cfg(unix)]
 async fn cmd_restore_state(cli: &Cli, name: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "restore_state",
@@ -1621,6 +1891,7 @@ async fn cmd_restore_state(cli: &Cli, name: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_restore_state)
 }
 
+#[cfg(unix)]
 async fn cmd_vault_save(
     cli: &Cli,
     profile: &str,
@@ -1650,6 +1921,7 @@ async fn cmd_vault_save(
     handle_response(cli, resp, output::format_text_vault_save)
 }
 
+#[cfg(unix)]
 async fn cmd_vault_login(cli: &Cli, profile: &str) -> CmdResult {
     let resp = daemon_client::send_request(
         "vault_login",
@@ -1661,6 +1933,7 @@ async fn cmd_vault_login(cli: &Cli, profile: &str) -> CmdResult {
     handle_response(cli, resp, output::format_text_vault_login)
 }
 
+#[cfg(unix)]
 async fn cmd_vault_list(cli: &Cli) -> CmdResult {
     let resp = daemon_client::send_request(
         "vault_list",
@@ -1672,6 +1945,7 @@ async fn cmd_vault_list(cli: &Cli) -> CmdResult {
     handle_response(cli, resp, output::format_text_vault_list)
 }
 
+#[cfg(unix)]
 async fn cmd_action_cache(
     cli: &Cli,
     action: &str,
@@ -1699,6 +1973,7 @@ async fn cmd_action_cache(
     handle_response(cli, resp, output::format_text_action_cache)
 }
 
+#[cfg(unix)]
 async fn cmd_check_injection(cli: &Cli, include_hidden: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "check_injection",
@@ -1710,6 +1985,7 @@ async fn cmd_check_injection(cli: &Cli, include_hidden: bool) -> CmdResult {
     handle_response(cli, resp, output::format_text_check_injection)
 }
 
+#[cfg(unix)]
 async fn cmd_generate_test(
     cli: &Cli,
     name: &str,
@@ -1733,6 +2009,7 @@ async fn cmd_generate_test(
     handle_response(cli, resp, output::format_text_generate_test)
 }
 
+#[cfg(unix)]
 async fn cmd_har_export(cli: &Cli, filename: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(f) = filename {
@@ -1748,6 +2025,7 @@ async fn cmd_har_export(cli: &Cli, filename: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_har_export)
 }
 
+#[cfg(unix)]
 async fn cmd_trace_start(cli: &Cli, name: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(n) = name {
@@ -1763,6 +2041,7 @@ async fn cmd_trace_start(cli: &Cli, name: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_trace_start)
 }
 
+#[cfg(unix)]
 async fn cmd_trace_stop(cli: &Cli, name: Option<&str>) -> CmdResult {
     let mut params = serde_json::json!({});
     if let Some(n) = name {
@@ -1778,6 +2057,7 @@ async fn cmd_trace_stop(cli: &Cli, name: Option<&str>) -> CmdResult {
     handle_response(cli, resp, output::format_text_trace_stop)
 }
 
+#[cfg(unix)]
 /// Generic response handler — delegates to the appropriate formatter based on --json flag.
 fn handle_response(
     cli: &Cli,

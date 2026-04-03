@@ -1,5 +1,6 @@
 pub mod chrome;
 pub mod config;
+#[cfg(unix)]
 pub mod ipc;
 pub mod types;
 
