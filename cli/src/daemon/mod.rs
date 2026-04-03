@@ -105,12 +105,18 @@ async fn run_daemon(
                 .ok();
             match old_pid {
                 Some(pid) => {
-                    // Check if process is alive via kill(pid, 0)
-                    nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(pid),
-                        None, // signal 0: check if process exists
-                    )
-                    .is_err()
+                    #[cfg(unix)]
+                    {
+                        nix::sys::signal::kill(
+                            nix::unistd::Pid::from_raw(pid),
+                            None, // signal 0: check if process exists
+                        )
+                        .is_err()
+                    }
+                    #[cfg(windows)]
+                    {
+                        !is_process_alive_windows(pid as u32)
+                    }
                 }
                 None => true,
             }
@@ -769,10 +775,33 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "shutdown" => {
+            // Acknowledge the shutdown request.
+            // The daemon exits on the next shutdown_signal poll (tokio::select loop).
+            // Phase 3 will call this via IPC from stop_daemon on Windows once the
+            // ipc module is cross-platform.
+            DaemonResponse::success(req.id, json!({"status": "shutting_down"}))
+        }
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
             format!("method not found: {}", req.method),
         ),
+    }
+}
+
+#[cfg(windows)]
+fn is_process_alive_windows(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == std::ptr::null_mut() {
+            return false;
+        }
+        CloseHandle(handle);
+        true
     }
 }
