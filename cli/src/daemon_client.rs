@@ -5,7 +5,7 @@ use gsd_browser_common::{
 use std::fs;
 use std::process::{Child, Stdio};
 use std::time::Duration;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{sleep, timeout};
 
 /// Check if daemon is alive: PID file exists, process alive, socket connectable.
@@ -75,7 +75,10 @@ pub async fn start_daemon(
             }
 
             // Clean up stale files
-            let _ = fs::remove_file(socket_path_for(session));
+            #[cfg(unix)]
+            {
+                let _ = fs::remove_file(socket_path_for(session));
+            }
             let _ = fs::remove_file(pid_path_for(session));
 
             // Spawn the daemon as a hidden subcommand of the current binary.
@@ -109,7 +112,10 @@ pub async fn start_daemon(
     // NOTE: _guard has already been dropped above — no Send issue with the await here.
     let result = wait_for_spawned_daemon(session, &mut child, Duration::from_secs(10)).await;
     if result.is_err() {
-        let _ = fs::remove_file(socket_path_for(session));
+        #[cfg(unix)]
+        {
+            let _ = fs::remove_file(socket_path_for(session));
+        }
         let _ = fs::remove_file(pid_path_for(session));
     }
 
@@ -125,12 +131,22 @@ async fn wait_for_socket(
     let poll_interval = Duration::from_millis(50);
 
     while start.elapsed() < max_wait {
-        if sock.exists() {
-            // Try connecting to verify it's actually listening
-            if UnixStream::connect(&sock).await.is_ok() {
+        #[cfg(unix)]
+        {
+            use tokio::net::UnixStream;
+            if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
                 return Ok(());
             }
         }
+
+        #[cfg(windows)]
+        {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            if ClientOptions::new().open(&sock).is_ok() {
+                return Ok(());
+            }
+        }
+
         sleep(poll_interval).await;
     }
 
@@ -151,8 +167,20 @@ async fn wait_for_spawned_daemon(
     let poll_interval = Duration::from_millis(50);
 
     while start.elapsed() < max_wait {
-        if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
-            return Ok(());
+        #[cfg(unix)]
+        {
+            use tokio::net::UnixStream;
+            if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
+                return Ok(());
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            if ClientOptions::new().open(&sock).is_ok() {
+                return Ok(());
+            }
         }
 
         if let Some(status) = child.try_wait()? {
@@ -203,16 +231,15 @@ pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Erro
 
     #[cfg(windows)]
     {
-        // TODO Phase 3: attempt graceful IPC shutdown via send_once("shutdown", ...)
-        // once gsd_browser_common::ipc is cross-platform. Currently skipped because
-        // ipc module is #[cfg(unix)] and Phase 2 precedes that change.
+        // TODO: Implement graceful shutdown via send_once("shutdown", ...)
+        // For now, use TerminateProcess as fallback
         if is_daemon_alive(session) {
             terminate_process_windows(pid as u32)
                 .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
         }
         std::thread::sleep(Duration::from_millis(500));
         let _ = fs::remove_file(pid_path_for(session));
-        let _ = fs::remove_file(socket_path_for(session));
+        // Windows named pipes are kernel objects — auto-cleanup when handles close
     }
 
     Ok(())
@@ -238,7 +265,10 @@ pub async fn send_request(
         Err(_) => {
             // Connection failed — daemon might have died. Restart and retry once.
             eprintln!("[gsd-browser] daemon connection failed, restarting...");
-            let _ = fs::remove_file(socket_path_for(session));
+            #[cfg(unix)]
+            {
+                let _ = fs::remove_file(socket_path_for(session));
+            }
             let _ = fs::remove_file(pid_path_for(session));
             start_daemon(browser_path, session).await?;
             send_once(method, params, session).await
@@ -252,22 +282,43 @@ async fn send_once(
     session: Option<&str>,
 ) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     let sock = socket_path_for(session);
-    let mut stream = timeout(Duration::from_secs(5), UnixStream::connect(&sock))
-        .await
-        .map_err(|_| "timeout connecting to daemon")?
-        .map_err(|e| format!("cannot connect to daemon socket: {e}"))?;
 
+    #[cfg(unix)]
+    {
+        use tokio::net::UnixStream;
+        let mut stream = timeout(Duration::from_secs(5), UnixStream::connect(&sock))
+            .await
+            .map_err(|_| "timeout connecting to daemon")?
+            .map_err(|e| format!("cannot connect to daemon socket: {e}"))?;
+        send_once_impl(&mut stream, method, params).await
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        let mut stream = ClientOptions::new()
+            .open(&sock)
+            .map_err(|e| format!("cannot connect to daemon pipe: {e}"))?;
+        send_once_impl(&mut stream, method, params).await
+    }
+}
+
+async fn send_once_impl<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     let req = DaemonRequest::new(1, method, params);
     let payload = serde_json::to_vec(&req)?;
 
     timeout(
         Duration::from_secs(30),
-        ipc::write_message(&mut stream, &payload),
+        ipc::write_message(stream, &payload),
     )
     .await
     .map_err(|_| "timeout writing request to daemon")??;
 
-    let raw = timeout(Duration::from_secs(30), ipc::read_message(&mut stream))
+    let raw = timeout(Duration::from_secs(30), ipc::read_message(stream))
         .await
         .map_err(|_| "timeout reading response from daemon")?
         .map_err(|e| format!("error reading response: {e}"))?;
