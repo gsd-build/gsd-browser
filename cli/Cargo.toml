@@ -22,8 +22,6 @@ chrono = { workspace = true }
 chromiumoxide = { workspace = true }
 dirs = { workspace = true }
 futures = { workspace = true }
-libc = { workspace = true }
-nix = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["signal"] }
@@ -34,3 +32,7 @@ regex-lite = "0.1"
 aes-gcm = { workspace = true }
 argon2 = { workspace = true }
 rand = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+nix = { version = "0.29", features = ["signal", "process", "fs"] }
+libc = "0.2"
