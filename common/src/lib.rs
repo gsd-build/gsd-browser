@@ -1,6 +1,5 @@
 pub mod chrome;
 pub mod config;
-#[cfg(unix)]
 pub mod ipc;
 pub mod types;
 
@@ -120,9 +119,18 @@ pub fn lock_path() -> std::path::PathBuf {
 /// Session-aware socket path. When session is Some, uses
 /// `~/.gsd-browser/sessions/<name>/daemon.sock`.
 pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
-    match session {
-        Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
-        None => socket_path(),
+    #[cfg(unix)]
+    {
+        match session {
+            Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
+            None => socket_path(),
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let name = session.unwrap_or("default");
+        std::path::PathBuf::from(format!(r"\\.\pipe\gsd-browser-{}", name))
     }
 }
 
