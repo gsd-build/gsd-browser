@@ -1,6 +1,4 @@
-#[cfg(unix)]
 mod daemon;
-#[cfg(unix)]
 mod daemon_client;
 mod output;
 
