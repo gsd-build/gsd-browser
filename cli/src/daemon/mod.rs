@@ -23,6 +23,51 @@ use std::process;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
+/// Kill any Chrome processes whose command line references `profile_dir`.
+/// On Unix this is a no-op (Chrome processes are children of the daemon and
+/// die when the daemon exits).  On Windows, zombie Chrome processes can
+/// outlive the daemon and hold file locks on the profile directory.
+fn kill_chrome_for_profile(profile_dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        // Convert profile path to a string we can search for in command lines.
+        // Use the canonical form so backslashes match what WMIC reports.
+        let needle = profile_dir
+            .to_string_lossy()
+            .replace('/', "\\");
+
+        // Use taskkill with WMIC-style filter: kill all chrome.exe whose
+        // command line contains our profile directory.
+        let output = std::process::Command::new("wmic")
+            .args([
+                "process",
+                "where",
+                &format!(
+                    "name='chrome.exe' and CommandLine like '%{}%'",
+                    needle.replace('\\', "\\\\")
+                ),
+                "call",
+                "terminate",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if let Ok(status) = output {
+            if status.success() {
+                info!("[gsd-browser-daemon] terminated zombie Chrome processes for {:?}", profile_dir);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = profile_dir; // no-op on Unix
+    }
+}
+
 /// Entry point for the daemon server. Called when the binary is invoked
 /// with the hidden `_daemon` subcommand.
 pub async fn run(
@@ -148,18 +193,24 @@ async fn run_daemon(
         chrome_path
     );
 
-    // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
-    // Clean it up proactively before launch.
-    let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
-    let lock = runner_dir.join("SingletonLock");
-    if lock.exists() {
-        warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
-        let _ = fs::remove_file(&lock);
-        let _ = fs::remove_dir_all(&runner_dir);
+    // Each session gets its own Chrome profile directory under ~/.gsd-browser/chrome-profiles/.
+    // This avoids collisions with the user's personal Chrome and between daemon sessions.
+    let chrome_data_dir = gsd_browser_common::chrome_data_dir_for(session);
+
+    // If the profile dir exists, it is stale from a previous crash or unclean shutdown.
+    // Kill any zombie Chrome processes using this profile, then remove the dir.
+    if chrome_data_dir.exists() {
+        warn!("[gsd-browser-daemon] cleaning stale Chrome profile at {:?}", chrome_data_dir);
+        kill_chrome_for_profile(&chrome_data_dir);
+        // Brief pause so Windows releases file handles after process termination
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = fs::remove_dir_all(&chrome_data_dir);
     }
+    fs::create_dir_all(&chrome_data_dir)?;
 
     let config = BrowserConfig::builder()
         .chrome_executable(chrome_path)
+        .user_data_dir(&chrome_data_dir)
         .window_size(1920, 1080)
         .build()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
@@ -299,6 +350,14 @@ async fn run_daemon(
     handler_task.abort();
     let _ = fs::remove_file(&sock_path);
     let _ = fs::remove_file(&pid_file_path);
+
+    // Clean up session Chrome profile — kill any remaining Chrome processes first,
+    // then remove the dir.  browser.close() is not always sufficient on Windows.
+    kill_chrome_for_profile(&chrome_data_dir);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    if chrome_data_dir.exists() {
+        let _ = fs::remove_dir_all(&chrome_data_dir);
+    }
     info!("[gsd-browser-daemon] shutdown complete");
 
     Ok(())

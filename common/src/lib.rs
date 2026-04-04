@@ -151,6 +151,14 @@ pub fn lock_path_for(session: Option<&str>) -> std::path::PathBuf {
     }
 }
 
+/// Session-aware Chrome user-data-dir.  Each daemon session gets its own
+/// Chrome profile so it never collides with the user's personal browser or
+/// other daemon sessions.  Lives under `~/.gsd-browser/chrome-profiles/<name>/`.
+pub fn chrome_data_dir_for(session: Option<&str>) -> std::path::PathBuf {
+    let name = session.unwrap_or("default");
+    state_dir().join("chrome-profiles").join(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
