@@ -16,7 +16,11 @@ gsd-browser uses a 5-layer configuration merge. Higher layers override lower one
 
 ```toml
 [browser]
+# macOS / Linux
 path = "/usr/bin/chromium"
+# Windows (uncomment one)
+# path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+# path = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
 headless = true
 
 [daemon]

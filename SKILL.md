@@ -484,7 +484,13 @@ Usually a stale Chrome lock file. Fix:
 
 ```bash
 gsd-browser daemon stop                            # Stop any existing daemon
-rm -f /tmp/chromiumoxide-runner/SingletonLock       # Remove stale lock
+
+# macOS / Linux
+rm -f /tmp/chromiumoxide-runner/SingletonLock
+
+# Windows (PowerShell)
+Remove-Item "$env:LOCALAPPDATA\Temp\chromiumoxide-runner\SingletonLock" -ErrorAction SilentlyContinue
+
 gsd-browser daemon health                          # Retry (auto-starts)
 ```
 
@@ -623,7 +629,11 @@ Example `gsd-browser.toml`:
 
 ```toml
 [browser]
+# macOS / Linux
 path = "/usr/bin/chromium"
+# Windows (uncomment one)
+# path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+# path = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
 
 [daemon]
 port = 9222
@@ -654,7 +664,8 @@ max_entries = 500
 Supported config overrides use `GSD_BROWSER_<SECTION>_<FIELD>` naming:
 
 ```bash
-GSD_BROWSER_BROWSER_PATH=/usr/bin/chromium
+GSD_BROWSER_BROWSER_PATH=/usr/bin/chromium                        # macOS / Linux
+# GSD_BROWSER_BROWSER_PATH=C:\Program Files\Google\Chrome\Application\chrome.exe  # Windows
 GSD_BROWSER_DAEMON_PORT=9223
 GSD_BROWSER_SCREENSHOT_QUALITY=90
 GSD_BROWSER_SETTLE_TIMEOUT_MS=1000
