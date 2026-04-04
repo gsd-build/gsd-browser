@@ -335,15 +335,21 @@ async fn send_once_impl<S: AsyncRead + AsyncWrite + Unpin>(
 fn is_process_alive_windows(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    // STILL_ACTIVE is defined as 259 (STATUS_PENDING / STILL_ACTIVE) in the Windows API.
+    const STILL_ACTIVE: u32 = 259;
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
         if handle.is_null() {
             return false;
         }
+        // A non-null handle can be returned for a terminated process that hasn't
+        // been fully reaped yet. Check the exit code: STILL_ACTIVE (259) means alive.
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
         CloseHandle(handle);
-        true
+        ok != 0 && exit_code == STILL_ACTIVE
     }
 }
 
@@ -362,4 +368,118 @@ fn terminate_process_windows(pid: u32) -> Result<(), Box<dyn std::error::Error>>
         CloseHandle(handle);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Process management tests (Windows-only) ──────────────────────────────
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn current_process_is_alive() {
+        // The current process is guaranteed alive — use its own PID as a known-live PID.
+        assert!(
+            is_process_alive_windows(std::process::id()),
+            "current process must report alive"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn exited_process_is_not_alive() {
+        // Spawn a process that exits immediately, record its PID, then verify it is gone.
+        let child = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .expect("failed to spawn cmd");
+        let pid = child.id();
+        drop(child); // child exits
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(
+            !is_process_alive_windows(pid),
+            "exited process PID {} should not be alive",
+            pid
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn terminate_process_stops_a_process() {
+        // Spawn a long-running process, terminate it via Windows API, verify it is gone.
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping localhost -n 60"])
+            .spawn()
+            .expect("failed to spawn ping");
+        let pid = child.id();
+        // Verify it is alive before termination
+        assert!(is_process_alive_windows(pid), "process must be alive before termination");
+        let result = terminate_process_windows(pid);
+        assert!(result.is_ok(), "terminate_process_windows should succeed: {:?}", result);
+        // Wait for the child handle to signal exit — this releases the kernel process object.
+        // Without this wait, OpenProcess can still succeed for a terminated-but-not-reaped process.
+        let _ = child.wait();
+        assert!(
+            !is_process_alive_windows(pid),
+            "terminated process PID {} should not be alive after wait",
+            pid
+        );
+    }
+
+    // ── File locking tests (Windows-only) ────────────────────────────────────
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn lock_acquisition_succeeds_on_fresh_file() {
+        use fd_lock::RwLock;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let lock_path = dir.path().join("daemon.lock");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file");
+        let mut flock = RwLock::new(file);
+        assert!(
+            flock.try_write().is_ok(),
+            "lock acquisition should succeed on a fresh file"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn lock_contention_returns_would_block() {
+        use fd_lock::RwLock;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let lock_path = dir.path().join("daemon.lock");
+
+        // Two SEPARATELY-opened handles to the same file path — contention test requires this.
+        let f1 = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file (handle 1)");
+        let f2 = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file (handle 2)");
+
+        let mut lock1 = RwLock::new(f1);
+        let mut lock2 = RwLock::new(f2);
+
+        let _held = lock1.try_write().expect("first lock acquisition should succeed");
+        let result = lock2.try_write();
+        assert!(result.is_err(), "second lock acquisition should fail under contention");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "contention error must be WouldBlock"
+        );
+    }
 }
