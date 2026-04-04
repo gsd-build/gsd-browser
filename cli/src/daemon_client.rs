@@ -482,4 +482,50 @@ mod tests {
             "contention error must be WouldBlock"
         );
     }
+
+    // ── Daemon lifecycle smoke test (Windows-only, requires Chrome) ──────────
+
+    #[tokio::test]
+    #[ignore] // Requires a real Chrome/Edge installation. Run with: cargo test -- --ignored smoke
+    #[cfg(target_os = "windows")]
+    async fn daemon_smoke_start_connect_stop() {
+        // Use a unique session name to avoid interfering with any real daemon instance.
+        // Named pipe: \\.\pipe\gsd-browser-test-smoke
+        let session = Some("test-smoke");
+
+        // 1. Ensure no leftover from a prior run
+        if is_daemon_alive(session) {
+            let _ = stop_daemon(session);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        // 2. Start the daemon (will launch Chrome — requires Chrome installed)
+        start_daemon(None, session)
+            .await
+            .expect("daemon failed to start");
+
+        assert!(is_daemon_alive(session), "daemon must be alive after start");
+
+        // 3. Send a ping-style command — "status" returns daemon state without browser interaction
+        let response = send_once("status", serde_json::json!({}), session).await;
+        assert!(
+            response.is_ok(),
+            "send_once(status) should succeed: {:?}",
+            response
+        );
+        let resp = response.unwrap();
+        assert!(
+            resp.error.is_none(),
+            "status response should not contain an error: {:?}",
+            resp.error
+        );
+
+        // 4. Stop the daemon cleanly
+        let stop_result = stop_daemon(session);
+        assert!(
+            stop_result.is_ok(),
+            "stop_daemon should succeed: {:?}",
+            stop_result
+        );
+    }
 }
