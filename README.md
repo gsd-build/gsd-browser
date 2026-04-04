@@ -6,10 +6,16 @@ Built for AI agents, CI pipelines, and developers who want deterministic browser
 
 ## Install
 
-### Recommended: installer (macOS / Linux)
+### Recommended: installer (macOS / Linux / Windows)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.ps1 | iex
 ```
 
 The installer downloads the correct `gsd-browser` binary for your platform. If Chrome or Chromium is already installed, it uses that. Otherwise it downloads Chromium automatically when Chrome for Testing is available for your platform.
@@ -24,6 +30,7 @@ Download from [GitHub Releases](https://github.com/gsd-build/gsd-browser/release
 | macOS (Intel) | `gsd-browser-darwin-x64` |
 | Linux (ARM64) | `gsd-browser-linux-arm64` |
 | Linux (x64) | `gsd-browser-linux-x64` |
+| Windows (x64) | `gsd-browser-windows-x64.exe` |
 
 ### Build from source
 
@@ -32,6 +39,8 @@ git clone https://github.com/gsd-build/gsd-browser.git
 cd gsd-browser
 cargo install --path cli
 ```
+
+> **Windows:** Requires the MSVC toolchain. Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) or full Visual Studio with the "Desktop development with C++" workload.
 
 ### Package registries
 
