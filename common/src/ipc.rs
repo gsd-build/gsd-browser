@@ -37,3 +37,43 @@ pub async fn read_message<S: AsyncRead + Unpin>(
     stream.read_exact(&mut buf).await?;
     Ok(buf)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test]
+    async fn write_then_read_roundtrip() {
+        let (mut client, mut server) = tokio::io::duplex(4096);
+        let msg = b"hello from ipc";
+        write_message(&mut client, msg).await.unwrap();
+        let received = read_message(&mut server).await.unwrap();
+        assert_eq!(received, msg.to_vec());
+    }
+
+    #[tokio::test]
+    async fn empty_payload_roundtrip() {
+        let (mut client, mut server) = tokio::io::duplex(64);
+        write_message(&mut client, b"").await.unwrap();
+        let received = read_message(&mut server).await.unwrap();
+        assert_eq!(received, b"".to_vec());
+    }
+
+    #[tokio::test]
+    async fn oversized_message_rejected() {
+        // Write a 4-byte length prefix of 17 MB (above the 16 MB limit) with no body.
+        // read_message must return Err(InvalidData) before trying to allocate the body.
+        let (mut client, mut server) = tokio::io::duplex(64 * 1024 * 1024);
+        let too_big: u32 = 17 * 1024 * 1024;
+        client.write_all(&too_big.to_be_bytes()).await.unwrap();
+        drop(client); // close write end so read_exact on body doesn't block
+        let result = read_message(&mut server).await;
+        assert!(result.is_err(), "expected error for oversized message");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::InvalidData,
+            "expected InvalidData error kind"
+        );
+    }
+}
