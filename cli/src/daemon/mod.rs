@@ -836,14 +836,56 @@ async fn dispatch_inner(
 fn is_process_alive_windows(pid: u32) -> bool {
     use windows_sys::Win32::Foundation::CloseHandle;
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    // STILL_ACTIVE is 259 (STATUS_PENDING) — the exit code of a running process.
+    const STILL_ACTIVE: u32 = 259;
     unsafe {
         let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if handle == std::ptr::null_mut() {
+        if handle.is_null() {
             return false;
         }
+        // A non-null handle can be returned for a terminated process that hasn't
+        // been fully reaped yet. Check the exit code: STILL_ACTIVE (259) means alive.
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
         CloseHandle(handle);
-        true
+        ok != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Stale PID / process alive tests (Windows-only) ───────────────────────
+    // Tests for the is_process_alive_windows function defined in this module,
+    // which is used by the stale socket cleanup logic in run_daemon().
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn is_process_alive_returns_true_for_current_pid() {
+        assert!(
+            is_process_alive_windows(std::process::id()),
+            "current process must report alive"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn is_process_alive_returns_false_for_dead_pid() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .expect("failed to spawn cmd");
+        let pid = child.id();
+        // Wait for the child to fully exit — releases the parent's handle so
+        // the kernel process object is reaped and OpenProcess returns null.
+        let _ = child.wait();
+        assert!(
+            !is_process_alive_windows(pid),
+            "exited process PID {} should not be alive",
+            pid
+        );
     }
 }
