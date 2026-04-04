@@ -142,8 +142,12 @@ async fn wait_for_socket(
         #[cfg(windows)]
         {
             use tokio::net::windows::named_pipe::ClientOptions;
-            if ClientOptions::new().open(&sock).is_ok() {
-                return Ok(());
+            match ClientOptions::new().open(&sock) {
+                Ok(_) => return Ok(()),
+                // ERROR_PIPE_BUSY means pipe exists but all instances are occupied —
+                // daemon IS running, just momentarily busy.
+                Err(e) if e.raw_os_error() == Some(231) => return Ok(()),
+                Err(_) => {}
             }
         }
 
@@ -178,8 +182,10 @@ async fn wait_for_spawned_daemon(
         #[cfg(windows)]
         {
             use tokio::net::windows::named_pipe::ClientOptions;
-            if ClientOptions::new().open(&sock).is_ok() {
-                return Ok(());
+            match ClientOptions::new().open(&sock) {
+                Ok(_) => return Ok(()),
+                Err(e) if e.raw_os_error() == Some(231) => return Ok(()),
+                Err(_) => {}
             }
         }
 
@@ -296,9 +302,21 @@ async fn send_once(
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let mut stream = ClientOptions::new()
-            .open(&sock)
-            .map_err(|e| format!("cannot connect to daemon pipe: {e}"))?;
+        // Retry on ERROR_PIPE_BUSY (os error 231): the single pipe instance is
+        // momentarily occupied by another client.  The daemon creates a new
+        // instance after each accept, so a short retry is sufficient.
+        let mut stream = {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match ClientOptions::new().open(&sock) {
+                    Ok(s) => break s,
+                    Err(e) if e.raw_os_error() == Some(231) && tokio::time::Instant::now() < deadline => {
+                        sleep(Duration::from_millis(50)).await;
+                    }
+                    Err(e) => return Err(format!("cannot connect to daemon pipe: {e}").into()),
+                }
+            }
+        };
         send_once_impl(&mut stream, method, params).await
     }
 }
