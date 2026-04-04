@@ -150,3 +150,36 @@ pub fn lock_path_for(session: Option<&str>) -> std::path::PathBuf {
         None => lock_path(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn socket_path_for_none_uses_default_on_windows() {
+        let path = socket_path_for(None);
+        let s = path.to_string_lossy();
+        assert!(
+            s.starts_with(r"\\.\pipe\gsd-browser-"),
+            "expected named pipe prefix, got: {}",
+            s
+        );
+        assert!(
+            s.ends_with("default"),
+            "expected 'default' session name, got: {}",
+            s
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn socket_path_for_named_session_on_windows() {
+        let path = socket_path_for(Some("staging"));
+        assert_eq!(
+            path.to_string_lossy(),
+            r"\\.\pipe\gsd-browser-staging",
+            "named session should produce exact named pipe path"
+        );
+    }
+}
