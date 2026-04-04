@@ -12,7 +12,10 @@
 # One-liner (macOS / Linux)
 curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
 
-# Or from a repo checkout
+# One-liner (Windows — PowerShell)
+irm https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.ps1 | iex
+
+# Or from a repo checkout (all platforms)
 git clone https://github.com/gsd-build/gsd-browser.git
 cd gsd-browser
 cargo install --path cli
@@ -28,15 +31,23 @@ The installer downloads the binary and reuses a system Chrome/Chromium when pres
 If Chrome/Chromium is not in the default location:
 
 ```bash
-# Via config file
+# Via config file (macOS / Linux)
 mkdir -p ~/.gsd-browser
 cat > ~/.gsd-browser/config.toml << 'TOML'
 [browser]
 path = "/path/to/chrome"
 TOML
 
-# Or via environment variable
-export GSD_BROWSER_BROWSER_PATH="/path/to/chrome"
+# Via config file (Windows — PowerShell)
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.gsd-browser" | Out-Null
+@"
+[browser]
+path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+"@ | Set-Content "$env:USERPROFILE\.gsd-browser\config.toml"
+
+# Or via environment variable (any platform)
+export GSD_BROWSER_BROWSER_PATH="/path/to/chrome"           # macOS / Linux
+$env:GSD_BROWSER_BROWSER_PATH="C:\Program Files\Google\Chrome\Application\chrome.exe"  # Windows
 
 # Or via CLI flag (per-command)
 gsd-browser --browser-path "/path/to/chrome" navigate https://example.com
@@ -48,7 +59,11 @@ Create `gsd-browser.toml` in your project root:
 
 ```toml
 [browser]
+# macOS / Linux
 path = "/usr/bin/chromium"
+# Windows (uncomment one)
+# path = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
+# path = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
 headless = true
 
 [daemon]

@@ -597,7 +597,7 @@ async fn main() {
         cli.browser_path = config.browser.path.clone();
     }
 
-    let result = match &cli.command {
+    let result: CmdResult = match &cli.command {
         Commands::Serve { browser_path, session } => {
             if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
                 eprintln!("[gsd-browser-daemon] fatal: {e}");
@@ -605,11 +605,13 @@ async fn main() {
             }
             Ok(())
         }
-        Commands::Daemon { cmd } => match cmd {
-            DaemonCmd::Start => cmd_daemon_start(&cli).await,
-            DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
-            DaemonCmd::Health => cmd_daemon_health(&cli).await,
-        },
+        Commands::Daemon { cmd } => {
+            match cmd {
+                DaemonCmd::Start => cmd_daemon_start(&cli).await,
+                DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
+                DaemonCmd::Health => cmd_daemon_health(&cli).await,
+            }
+        }
         Commands::Navigate { url, .. } => cmd_navigate(&cli, url).await,
         Commands::Back => cmd_back(&cli).await,
         Commands::Forward => cmd_forward(&cli).await,

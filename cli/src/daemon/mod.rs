@@ -21,8 +21,52 @@ use state::DaemonState;
 use std::fs;
 use std::process;
 use std::sync::Arc;
-use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
+
+/// Kill any Chrome processes whose command line references `profile_dir`.
+/// On Unix this is a no-op (Chrome processes are children of the daemon and
+/// die when the daemon exits).  On Windows, zombie Chrome processes can
+/// outlive the daemon and hold file locks on the profile directory.
+fn kill_chrome_for_profile(profile_dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+
+        // Convert profile path to a string we can search for in command lines.
+        // Use the canonical form so backslashes match what WMIC reports.
+        let needle = profile_dir
+            .to_string_lossy()
+            .replace('/', "\\");
+
+        // Use taskkill with WMIC-style filter: kill all chrome.exe whose
+        // command line contains our profile directory.
+        let output = std::process::Command::new("wmic")
+            .args([
+                "process",
+                "where",
+                &format!(
+                    "name='chrome.exe' and CommandLine like '%{}%'",
+                    needle.replace('\\', "\\\\")
+                ),
+                "call",
+                "terminate",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status();
+
+        if let Ok(status) = output {
+            if status.success() {
+                info!("[gsd-browser-daemon] terminated zombie Chrome processes for {:?}", profile_dir);
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = profile_dir; // no-op on Unix
+    }
+}
 
 /// Entry point for the daemon server. Called when the binary is invoked
 /// with the hidden `_daemon` subcommand.
@@ -105,12 +149,18 @@ async fn run_daemon(
                 .ok();
             match old_pid {
                 Some(pid) => {
-                    // Check if process is alive via kill(pid, 0)
-                    nix::sys::signal::kill(
-                        nix::unistd::Pid::from_raw(pid),
-                        None, // signal 0: check if process exists
-                    )
-                    .is_err()
+                    #[cfg(unix)]
+                    {
+                        nix::sys::signal::kill(
+                            nix::unistd::Pid::from_raw(pid),
+                            None, // signal 0: check if process exists
+                        )
+                        .is_err()
+                    }
+                    #[cfg(windows)]
+                    {
+                        !is_process_alive_windows(pid as u32)
+                    }
                 }
                 None => true,
             }
@@ -143,18 +193,24 @@ async fn run_daemon(
         chrome_path
     );
 
-    // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
-    // Clean it up proactively before launch.
-    let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
-    let lock = runner_dir.join("SingletonLock");
-    if lock.exists() {
-        warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
-        let _ = fs::remove_file(&lock);
-        let _ = fs::remove_dir_all(&runner_dir);
+    // Each session gets its own Chrome profile directory under ~/.gsd-browser/chrome-profiles/.
+    // This avoids collisions with the user's personal Chrome and between daemon sessions.
+    let chrome_data_dir = gsd_browser_common::chrome_data_dir_for(session);
+
+    // If the profile dir exists, it is stale from a previous crash or unclean shutdown.
+    // Kill any zombie Chrome processes using this profile, then remove the dir.
+    if chrome_data_dir.exists() {
+        warn!("[gsd-browser-daemon] cleaning stale Chrome profile at {:?}", chrome_data_dir);
+        kill_chrome_for_profile(&chrome_data_dir);
+        // Brief pause so Windows releases file handles after process termination
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let _ = fs::remove_dir_all(&chrome_data_dir);
     }
+    fs::create_dir_all(&chrome_data_dir)?;
 
     let config = BrowserConfig::builder()
         .chrome_executable(chrome_path)
+        .user_data_dir(&chrome_data_dir)
         .window_size(1920, 1080)
         .build()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
@@ -214,50 +270,101 @@ async fn run_daemon(
         pages.register(page_arc, String::new(), "about:blank".to_string());
     }
 
-    // Bind Unix socket
-    let listener = UnixListener::bind(&sock_path)?;
-    info!("[gsd-browser-daemon] listening on {:?}", sock_path);
-
     // Trap termination signals so `daemon stop` can shut Chrome down cleanly.
     let shutdown = shutdown_signal();
     tokio::pin!(shutdown);
 
-    loop {
-        tokio::select! {
-            accept_result = listener.accept() => {
-                match accept_result {
-                    Ok((stream, _addr)) => {
-                        info!("[gsd-browser-daemon] connection accepted");
-                        let logs = Arc::clone(&daemon_logs);
-                        let state = Arc::clone(&daemon_state);
-                        tokio::spawn(handle_connection(stream, logs, state));
-                    }
-                    Err(e) => {
-                        error!("[gsd-browser-daemon] accept error: {e}");
+    #[cfg(unix)]
+    {
+        use tokio::net::UnixListener;
+
+        let listener = UnixListener::bind(&sock_path)?;
+        info!("[gsd-browser-daemon] listening on {:?}", sock_path);
+
+        loop {
+            tokio::select! {
+                accept_result = listener.accept() => {
+                    match accept_result {
+                        Ok((stream, _addr)) => {
+                            info!("[gsd-browser-daemon] connection accepted");
+                            let logs = Arc::clone(&daemon_logs);
+                            let state = Arc::clone(&daemon_state);
+                            tokio::spawn(handle_connection(stream, logs, state));
+                        }
+                        Err(e) => {
+                            error!("[gsd-browser-daemon] accept error: {e}");
+                        }
                     }
                 }
+                _ = &mut shutdown => {
+                    info!("[gsd-browser-daemon] shutting down...");
+                    break;
+                }
             }
-            _ = &mut shutdown => {
-                info!("[gsd-browser-daemon] shutting down...");
-                break;
+        }
+
+        drop(listener);
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let mut server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&sock_path)?;
+        info!("[gsd-browser-daemon] listening on {:?}", sock_path);
+
+        loop {
+            tokio::select! {
+                result = server.connect() => {
+                    match result {
+                        Ok(()) => {
+                            info!("[gsd-browser-daemon] connection accepted");
+                            let connected = server;
+
+                            // CRITICAL: Create next instance BEFORE spawning handler.
+                            // This prevents NotFound errors when clients connect (D-06).
+                            server = ServerOptions::new().create(&sock_path)?;
+
+                            let logs = Arc::clone(&daemon_logs);
+                            let state = Arc::clone(&daemon_state);
+                            tokio::spawn(handle_connection(connected, logs, state));
+                        }
+                        Err(e) => {
+                            error!("[gsd-browser-daemon] accept error: {e}");
+                        }
+                    }
+                }
+                _ = &mut shutdown => {
+                    info!("[gsd-browser-daemon] shutting down...");
+                    break;
+                }
             }
         }
     }
 
     // Clean shutdown
-    drop(listener);
     let _ = browser.close().await;
     let _ = browser.wait().await;
     handler_task.abort();
     let _ = fs::remove_file(&sock_path);
     let _ = fs::remove_file(&pid_file_path);
+
+    // Clean up session Chrome profile — kill any remaining Chrome processes first,
+    // then remove the dir.  browser.close() is not always sufficient on Windows.
+    kill_chrome_for_profile(&chrome_data_dir);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    if chrome_data_dir.exists() {
+        let _ = fs::remove_dir_all(&chrome_data_dir);
+    }
     info!("[gsd-browser-daemon] shutdown complete");
 
     Ok(())
 }
 
-async fn handle_connection(
-    mut stream: tokio::net::UnixStream,
+async fn handle_connection<S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static>(
+    mut stream: S,
     logs: Arc<DaemonLogs>,
     state: Arc<DaemonState>,
 ) {
@@ -769,10 +876,75 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "shutdown" => {
+            // Acknowledge the shutdown request.
+            // The daemon exits on the next shutdown_signal poll (tokio::select loop).
+            // Phase 3 will call this via IPC from stop_daemon on Windows once the
+            // ipc module is cross-platform.
+            DaemonResponse::success(req.id, json!({"status": "shutting_down"}))
+        }
         _ => DaemonResponse::error(
             req.id,
             ERR_METHOD_NOT_FOUND,
             format!("method not found: {}", req.method),
         ),
+    }
+}
+
+#[cfg(windows)]
+fn is_process_alive_windows(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // STILL_ACTIVE is 259 (STATUS_PENDING) — the exit code of a running process.
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        // A non-null handle can be returned for a terminated process that hasn't
+        // been fully reaped yet. Check the exit code: STILL_ACTIVE (259) means alive.
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Stale PID / process alive tests (Windows-only) ───────────────────────
+    // Tests for the is_process_alive_windows function defined in this module,
+    // which is used by the stale socket cleanup logic in run_daemon().
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn is_process_alive_returns_true_for_current_pid() {
+        assert!(
+            is_process_alive_windows(std::process::id()),
+            "current process must report alive"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn is_process_alive_returns_false_for_dead_pid() {
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .expect("failed to spawn cmd");
+        let pid = child.id();
+        // Wait for the child to fully exit — releases the parent's handle so
+        // the kernel process object is reaped and OpenProcess returns null.
+        let _ = child.wait();
+        assert!(
+            !is_process_alive_windows(pid),
+            "exited process PID {} should not be alive",
+            pid
+        );
     }
 }

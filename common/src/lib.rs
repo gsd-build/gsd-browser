@@ -119,9 +119,18 @@ pub fn lock_path() -> std::path::PathBuf {
 /// Session-aware socket path. When session is Some, uses
 /// `~/.gsd-browser/sessions/<name>/daemon.sock`.
 pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
-    match session {
-        Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
-        None => socket_path(),
+    #[cfg(unix)]
+    {
+        match session {
+            Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
+            None => socket_path(),
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        let name = session.unwrap_or("default");
+        std::path::PathBuf::from(format!(r"\\.\pipe\gsd-browser-{}", name))
     }
 }
 
@@ -139,5 +148,46 @@ pub fn lock_path_for(session: Option<&str>) -> std::path::PathBuf {
     match session {
         Some(name) => state_dir().join("sessions").join(name).join("daemon.lock"),
         None => lock_path(),
+    }
+}
+
+/// Session-aware Chrome user-data-dir.  Each daemon session gets its own
+/// Chrome profile so it never collides with the user's personal browser or
+/// other daemon sessions.  Lives under `~/.gsd-browser/chrome-profiles/<name>/`.
+pub fn chrome_data_dir_for(session: Option<&str>) -> std::path::PathBuf {
+    let name = session.unwrap_or("default");
+    state_dir().join("chrome-profiles").join(name)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn socket_path_for_none_uses_default_on_windows() {
+        let path = socket_path_for(None);
+        let s = path.to_string_lossy();
+        assert!(
+            s.starts_with(r"\\.\pipe\gsd-browser-"),
+            "expected named pipe prefix, got: {}",
+            s
+        );
+        assert!(
+            s.ends_with("default"),
+            "expected 'default' session name, got: {}",
+            s
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn socket_path_for_named_session_on_windows() {
+        let path = socket_path_for(Some("staging"));
+        assert_eq!(
+            path.to_string_lossy(),
+            r"\\.\pipe\gsd-browser-staging",
+            "named session should produce exact named pipe path"
+        );
     }
 }

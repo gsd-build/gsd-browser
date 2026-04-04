@@ -1,10 +1,11 @@
+use fd_lock::RwLock;
 use gsd_browser_common::{
     ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
 };
 use std::fs;
 use std::process::{Child, Stdio};
 use std::time::Duration;
-use tokio::net::UnixStream;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::time::{sleep, timeout};
 
 /// Check if daemon is alive: PID file exists, process alive, socket connectable.
@@ -24,8 +25,15 @@ pub fn is_daemon_alive(session: Option<&str>) -> bool {
         Err(_) => return false,
     };
 
-    // Check process alive via kill(pid, 0)
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    // Check process alive via platform-specific method
+    #[cfg(unix)]
+    {
+        nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    }
+    #[cfg(windows)]
+    {
+        is_process_alive_windows(pid as u32)
+    }
 }
 
 /// Start the daemon process. Spawns the daemon binary in the background and
@@ -52,62 +60,64 @@ pub async fn start_daemon(
         .truncate(false)
         .open(&lock_file)?;
 
-    // Try to acquire exclusive lock (non-blocking first)
-    use std::os::unix::io::AsRawFd;
-    let fd = lock_fd.as_raw_fd();
-    let lock_result = unsafe { libc::flock(fd, libc::LOCK_EX | libc::LOCK_NB) };
+    let mut flock = RwLock::new(lock_fd);
+    let mut child = match flock.try_write() {
+        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            // Another process is starting the daemon — wait for socket
+            eprintln!("[gsd-browser] waiting for daemon start by another process...");
+            return wait_for_socket(session, Duration::from_secs(10)).await;
+        }
+        Err(e) => return Err(e.into()),
+        Ok(_guard) => {
+            // We hold the lock (RAII — _guard drops at end of this block)
+            if is_daemon_alive(session) && sock.exists() {
+                return Ok(());
+            }
 
-    if lock_result != 0 {
-        // Another process is starting the daemon — wait for socket
-        eprintln!("[gsd-browser] waiting for daemon start by another process...");
-        return wait_for_socket(session, Duration::from_secs(10)).await;
-    }
+            // Clean up stale files
+            #[cfg(unix)]
+            {
+                let _ = fs::remove_file(socket_path_for(session));
+            }
+            let _ = fs::remove_file(pid_path_for(session));
 
-    // We hold the lock — check if daemon is already alive
-    if is_daemon_alive(session) && sock.exists() {
-        // Already running — release lock and return
-        let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
-        return Ok(());
-    }
+            // Spawn the daemon as a hidden subcommand of the current binary.
+            let exe = std::env::current_exe()
+                .map_err(|e| format!("cannot determine current executable: {e}"))?;
 
-    // Clean up stale files
-    let _ = fs::remove_file(socket_path_for(session));
-    let _ = fs::remove_file(pid_path_for(session));
+            let mut cmd = std::process::Command::new(&exe);
+            cmd.arg("_serve");
+            if let Some(path) = browser_path {
+                cmd.arg("--browser-path").arg(path);
+            }
+            if let Some(name) = session {
+                cmd.arg("--session").arg(name);
+            }
 
-    // Spawn the daemon as a hidden subcommand of the current binary.
-    let exe =
-        std::env::current_exe().map_err(|e| format!("cannot determine current executable: {e}"))?;
+            // In debug mode, inherit daemon logs so startup failures are visible.
+            cmd.stdin(Stdio::null());
+            if std::env::var_os("GSD_BROWSER_DEBUG").is_some() {
+                cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
+            } else {
+                cmd.stdout(Stdio::null()).stderr(Stdio::null());
+            }
 
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("_serve");
-    if let Some(path) = browser_path {
-        cmd.arg("--browser-path").arg(path);
-    }
-    if let Some(name) = session {
-        cmd.arg("--session").arg(name);
-    }
-
-    // In debug mode, inherit daemon logs so startup failures are visible.
-    cmd.stdin(Stdio::null());
-    if std::env::var_os("GSD_BROWSER_DEBUG").is_some() {
-        cmd.stdout(Stdio::inherit()).stderr(Stdio::inherit());
-    } else {
-        cmd.stdout(Stdio::null()).stderr(Stdio::null());
-    }
-
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?;
+            cmd.spawn()
+                .map_err(|e| format!("failed to start daemon ({:?}): {}", exe, e))?
+            // _guard drops here, releasing the lock BEFORE any .await
+        }
+    };
 
     // Wait for socket to appear and fail fast if the daemon exits during startup.
+    // NOTE: _guard has already been dropped above — no Send issue with the await here.
     let result = wait_for_spawned_daemon(session, &mut child, Duration::from_secs(10)).await;
     if result.is_err() {
-        let _ = fs::remove_file(socket_path_for(session));
+        #[cfg(unix)]
+        {
+            let _ = fs::remove_file(socket_path_for(session));
+        }
         let _ = fs::remove_file(pid_path_for(session));
     }
-
-    // Release lock
-    let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
 
     result
 }
@@ -121,12 +131,26 @@ async fn wait_for_socket(
     let poll_interval = Duration::from_millis(50);
 
     while start.elapsed() < max_wait {
-        if sock.exists() {
-            // Try connecting to verify it's actually listening
-            if UnixStream::connect(&sock).await.is_ok() {
+        #[cfg(unix)]
+        {
+            use tokio::net::UnixStream;
+            if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
                 return Ok(());
             }
         }
+
+        #[cfg(windows)]
+        {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            match ClientOptions::new().open(&sock) {
+                Ok(_) => return Ok(()),
+                // ERROR_PIPE_BUSY means pipe exists but all instances are occupied —
+                // daemon IS running, just momentarily busy.
+                Err(e) if e.raw_os_error() == Some(231) => return Ok(()),
+                Err(_) => {}
+            }
+        }
+
         sleep(poll_interval).await;
     }
 
@@ -147,8 +171,22 @@ async fn wait_for_spawned_daemon(
     let poll_interval = Duration::from_millis(50);
 
     while start.elapsed() < max_wait {
-        if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
-            return Ok(());
+        #[cfg(unix)]
+        {
+            use tokio::net::UnixStream;
+            if sock.exists() && UnixStream::connect(&sock).await.is_ok() {
+                return Ok(());
+            }
+        }
+
+        #[cfg(windows)]
+        {
+            use tokio::net::windows::named_pipe::ClientOptions;
+            match ClientOptions::new().open(&sock) {
+                Ok(_) => return Ok(()),
+                Err(e) if e.raw_os_error() == Some(231) => return Ok(()),
+                Err(_) => {}
+            }
         }
 
         if let Some(status) = child.try_wait()? {
@@ -168,7 +206,8 @@ async fn wait_for_spawned_daemon(
     .into())
 }
 
-/// Stop the daemon by sending SIGTERM to the PID in the pidfile.
+/// Stop the daemon by sending SIGTERM to the PID in the pidfile (Unix) or
+/// TerminateProcess (Windows).
 pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let pid_file = pid_path_for(session);
     if !pid_file.exists() {
@@ -178,19 +217,35 @@ pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     let pid_str = fs::read_to_string(&pid_file)?;
     let pid: i32 = pid_str.trim().parse().map_err(|_| "invalid PID file")?;
 
-    nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid),
-        nix::sys::signal::Signal::SIGTERM,
-    )
-    .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
+    #[cfg(unix)]
+    {
+        nix::sys::signal::kill(
+            nix::unistd::Pid::from_raw(pid),
+            nix::sys::signal::Signal::SIGTERM,
+        )
+        .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
 
-    // Wait briefly for cleanup
-    std::thread::sleep(Duration::from_millis(500));
+        // Wait briefly for cleanup
+        std::thread::sleep(Duration::from_millis(500));
 
-    // Clean up if process is gone
-    if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
+        // Clean up if process is gone
+        if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
+            let _ = fs::remove_file(pid_path_for(session));
+            let _ = fs::remove_file(socket_path_for(session));
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        // TODO: Implement graceful shutdown via send_once("shutdown", ...)
+        // For now, use TerminateProcess as fallback
+        if is_daemon_alive(session) {
+            terminate_process_windows(pid as u32)
+                .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
+        }
+        std::thread::sleep(Duration::from_millis(500));
         let _ = fs::remove_file(pid_path_for(session));
-        let _ = fs::remove_file(socket_path_for(session));
+        // Windows named pipes are kernel objects — auto-cleanup when handles close
     }
 
     Ok(())
@@ -216,7 +271,10 @@ pub async fn send_request(
         Err(_) => {
             // Connection failed — daemon might have died. Restart and retry once.
             eprintln!("[gsd-browser] daemon connection failed, restarting...");
-            let _ = fs::remove_file(socket_path_for(session));
+            #[cfg(unix)]
+            {
+                let _ = fs::remove_file(socket_path_for(session));
+            }
             let _ = fs::remove_file(pid_path_for(session));
             start_daemon(browser_path, session).await?;
             send_once(method, params, session).await
@@ -230,22 +288,55 @@ async fn send_once(
     session: Option<&str>,
 ) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     let sock = socket_path_for(session);
-    let mut stream = timeout(Duration::from_secs(5), UnixStream::connect(&sock))
-        .await
-        .map_err(|_| "timeout connecting to daemon")?
-        .map_err(|e| format!("cannot connect to daemon socket: {e}"))?;
 
+    #[cfg(unix)]
+    {
+        use tokio::net::UnixStream;
+        let mut stream = timeout(Duration::from_secs(5), UnixStream::connect(&sock))
+            .await
+            .map_err(|_| "timeout connecting to daemon")?
+            .map_err(|e| format!("cannot connect to daemon socket: {e}"))?;
+        send_once_impl(&mut stream, method, params).await
+    }
+
+    #[cfg(windows)]
+    {
+        use tokio::net::windows::named_pipe::ClientOptions;
+        // Retry on ERROR_PIPE_BUSY (os error 231): the single pipe instance is
+        // momentarily occupied by another client.  The daemon creates a new
+        // instance after each accept, so a short retry is sufficient.
+        let mut stream = {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+            loop {
+                match ClientOptions::new().open(&sock) {
+                    Ok(s) => break s,
+                    Err(e) if e.raw_os_error() == Some(231) && tokio::time::Instant::now() < deadline => {
+                        sleep(Duration::from_millis(50)).await;
+                    }
+                    Err(e) => return Err(format!("cannot connect to daemon pipe: {e}").into()),
+                }
+            }
+        };
+        send_once_impl(&mut stream, method, params).await
+    }
+}
+
+async fn send_once_impl<S: AsyncRead + AsyncWrite + Unpin>(
+    stream: &mut S,
+    method: &str,
+    params: serde_json::Value,
+) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     let req = DaemonRequest::new(1, method, params);
     let payload = serde_json::to_vec(&req)?;
 
     timeout(
         Duration::from_secs(30),
-        ipc::write_message(&mut stream, &payload),
+        ipc::write_message(stream, &payload),
     )
     .await
     .map_err(|_| "timeout writing request to daemon")??;
 
-    let raw = timeout(Duration::from_secs(30), ipc::read_message(&mut stream))
+    let raw = timeout(Duration::from_secs(30), ipc::read_message(stream))
         .await
         .map_err(|_| "timeout reading response from daemon")?
         .map_err(|e| format!("error reading response: {e}"))?;
@@ -256,4 +347,203 @@ async fn send_once(
 
     let resp: DaemonResponse = serde_json::from_slice(&raw)?;
     Ok(resp)
+}
+
+#[cfg(windows)]
+fn is_process_alive_windows(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    // STILL_ACTIVE is defined as 259 (STATUS_PENDING / STILL_ACTIVE) in the Windows API.
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            return false;
+        }
+        // A non-null handle can be returned for a terminated process that hasn't
+        // been fully reaped yet. Check the exit code: STILL_ACTIVE (259) means alive.
+        let mut exit_code: u32 = 0;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE
+    }
+}
+
+#[cfg(windows)]
+fn terminate_process_windows(pid: u32) -> Result<(), Box<dyn std::error::Error>> {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{
+        OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+    };
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle.is_null() {
+            return Err(format!("failed to open process {pid} for termination").into());
+        }
+        TerminateProcess(handle, 1);
+        CloseHandle(handle);
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Process management tests (Windows-only) ──────────────────────────────
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn current_process_is_alive() {
+        // The current process is guaranteed alive — use its own PID as a known-live PID.
+        assert!(
+            is_process_alive_windows(std::process::id()),
+            "current process must report alive"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn exited_process_is_not_alive() {
+        // Spawn a process that exits immediately, record its PID, then verify it is gone.
+        let child = std::process::Command::new("cmd")
+            .args(["/c", "exit 0"])
+            .spawn()
+            .expect("failed to spawn cmd");
+        let pid = child.id();
+        drop(child); // child exits
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert!(
+            !is_process_alive_windows(pid),
+            "exited process PID {} should not be alive",
+            pid
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn terminate_process_stops_a_process() {
+        // Spawn a long-running process, terminate it via Windows API, verify it is gone.
+        let mut child = std::process::Command::new("cmd")
+            .args(["/c", "ping localhost -n 60"])
+            .spawn()
+            .expect("failed to spawn ping");
+        let pid = child.id();
+        // Verify it is alive before termination
+        assert!(is_process_alive_windows(pid), "process must be alive before termination");
+        let result = terminate_process_windows(pid);
+        assert!(result.is_ok(), "terminate_process_windows should succeed: {:?}", result);
+        // Wait for the child handle to signal exit — this releases the kernel process object.
+        // Without this wait, OpenProcess can still succeed for a terminated-but-not-reaped process.
+        let _ = child.wait();
+        assert!(
+            !is_process_alive_windows(pid),
+            "terminated process PID {} should not be alive after wait",
+            pid
+        );
+    }
+
+    // ── File locking tests (Windows-only) ────────────────────────────────────
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn lock_acquisition_succeeds_on_fresh_file() {
+        use fd_lock::RwLock;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let lock_path = dir.path().join("daemon.lock");
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file");
+        let mut flock = RwLock::new(file);
+        assert!(
+            flock.try_write().is_ok(),
+            "lock acquisition should succeed on a fresh file"
+        );
+    }
+
+    #[test]
+    #[cfg(target_os = "windows")]
+    fn lock_contention_returns_would_block() {
+        use fd_lock::RwLock;
+
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        let lock_path = dir.path().join("daemon.lock");
+
+        // Two SEPARATELY-opened handles to the same file path — contention test requires this.
+        let f1 = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file (handle 1)");
+        let f2 = std::fs::OpenOptions::new()
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)
+            .expect("failed to open lock file (handle 2)");
+
+        let mut lock1 = RwLock::new(f1);
+        let mut lock2 = RwLock::new(f2);
+
+        let _held = lock1.try_write().expect("first lock acquisition should succeed");
+        let result = lock2.try_write();
+        assert!(result.is_err(), "second lock acquisition should fail under contention");
+        assert_eq!(
+            result.unwrap_err().kind(),
+            std::io::ErrorKind::WouldBlock,
+            "contention error must be WouldBlock"
+        );
+    }
+
+    // ── Daemon lifecycle smoke test (Windows-only, requires Chrome) ──────────
+
+    #[tokio::test]
+    #[ignore] // Requires a real Chrome/Edge installation. Run with: cargo test -- --ignored smoke
+    #[cfg(target_os = "windows")]
+    async fn daemon_smoke_start_connect_stop() {
+        // Use a unique session name to avoid interfering with any real daemon instance.
+        // Named pipe: \\.\pipe\gsd-browser-test-smoke
+        let session = Some("test-smoke");
+
+        // 1. Ensure no leftover from a prior run
+        if is_daemon_alive(session) {
+            let _ = stop_daemon(session);
+            std::thread::sleep(std::time::Duration::from_millis(500));
+        }
+
+        // 2. Start the daemon (will launch Chrome — requires Chrome installed)
+        start_daemon(None, session)
+            .await
+            .expect("daemon failed to start");
+
+        assert!(is_daemon_alive(session), "daemon must be alive after start");
+
+        // 3. Send a ping-style command — "status" returns daemon state without browser interaction
+        let response = send_once("status", serde_json::json!({}), session).await;
+        assert!(
+            response.is_ok(),
+            "send_once(status) should succeed: {:?}",
+            response
+        );
+        let resp = response.unwrap();
+        assert!(
+            resp.error.is_none(),
+            "status response should not contain an error: {:?}",
+            resp.error
+        );
+
+        // 4. Stop the daemon cleanly
+        let stop_result = stop_daemon(session);
+        assert!(
+            stop_result.is_ok(),
+            "stop_daemon should succeed: {:?}",
+            stop_result
+        );
+    }
 }

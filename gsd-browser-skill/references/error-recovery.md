@@ -67,7 +67,13 @@ gsd-browser network                    # Check BEFORE next navigation
 
 ```bash
 gsd-browser daemon stop
+
+# macOS / Linux
 rm -f /tmp/chromiumoxide-runner/SingletonLock
+
+# Windows (PowerShell)
+Remove-Item "$env:LOCALAPPDATA\Temp\chromiumoxide-runner\SingletonLock" -ErrorAction SilentlyContinue
+
 gsd-browser daemon health              # Retry (auto-starts)
 ```
 
