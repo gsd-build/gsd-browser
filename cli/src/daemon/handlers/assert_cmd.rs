@@ -369,6 +369,51 @@ pub async fn handle_assert(
                     format!("{count}"),
                 )
             }
+            "element_count" => {
+                if selector.is_empty() {
+                    return Err("element_count requires 'selector'".into());
+                }
+                // Count matching elements via JS (querySelectorAll covers hidden elements too)
+                let js = format!(
+                    "document.querySelectorAll({:?}).length",
+                    selector
+                );
+                let count: i64 = match page.evaluate_expression(&js).await {
+                    Ok(result) => result.into_value::<i64>().unwrap_or(0),
+                    Err(_) => 0,
+                };
+
+                let min = check.get("min").and_then(|v| v.as_i64());
+                let max = check.get("max").and_then(|v| v.as_i64());
+                let exact = check.get("exact").and_then(|v| v.as_i64());
+
+                let (pass, expected_str) = if let Some(e) = exact {
+                    (count == e, format!("exactly {e} elements"))
+                } else if !threshold_str.is_empty() {
+                    let threshold = parse_threshold(threshold_str)
+                        .map_err(|e| format!("bad threshold: {e}"))?;
+                    (
+                        threshold_met(count, &threshold),
+                        format!("count {}", threshold_display(&threshold)),
+                    )
+                } else {
+                    let min_ok = min.map_or(true, |m| count >= m);
+                    let max_ok = max.map_or(true, |m| count <= m);
+                    let expected = match (min, max) {
+                        (Some(mn), Some(mx)) => format!("{mn}..={mx} elements"),
+                        (Some(mn), None) => format!(">={mn} elements"),
+                        (None, Some(mx)) => format!("<={mx} elements"),
+                        (None, None) => "any count".into(),
+                    };
+                    (min_ok && max_ok, expected)
+                };
+
+                (
+                    pass,
+                    format!("'{selector}' {expected_str}"),
+                    format!("{count} found"),
+                )
+            }
             "no_console_errors_since" => {
                 let errors: Vec<_> = console_entries
                     .iter()
@@ -640,5 +685,31 @@ mod tests {
         assert_eq!(threshold_display(&t), ">=3");
         let t = parse_threshold("==0").unwrap();
         assert_eq!(threshold_display(&t), "==0");
+    }
+
+    // element_count threshold logic (pure, no page needed)
+    #[test]
+    fn test_element_count_min_pass() {
+        let t = parse_threshold(">=5").unwrap();
+        assert!(threshold_met(5, &t));
+        assert!(threshold_met(10, &t));
+        assert!(!threshold_met(4, &t));
+    }
+
+    #[test]
+    fn test_element_count_exact() {
+        // exact == threshold with ==
+        let t = parse_threshold("==3").unwrap();
+        assert!(threshold_met(3, &t));
+        assert!(!threshold_met(2, &t));
+        assert!(!threshold_met(4, &t));
+    }
+
+    #[test]
+    fn test_element_count_max() {
+        let t = parse_threshold("<=10").unwrap();
+        assert!(threshold_met(0, &t));
+        assert!(threshold_met(10, &t));
+        assert!(!threshold_met(11, &t));
     }
 }
