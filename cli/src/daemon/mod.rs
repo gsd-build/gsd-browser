@@ -153,13 +153,17 @@ async fn run_daemon(
         let _ = fs::remove_dir_all(&runner_dir);
     }
 
-    let config = BrowserConfig::builder()
+    let mut builder = BrowserConfig::builder()
         .chrome_executable(chrome_path)
-        .window_size(1920, 1080)
+        .window_size(1920, 1080);
+    if !config.browser.headless {
+        builder = builder.with_head();
+    }
+    let browser_config = builder
         .build()
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
 
-    let (mut browser, mut handler) = Browser::launch(config).await?;
+    let (mut browser, mut handler) = Browser::launch(browser_config).await?;
     info!("[gsd-browser-daemon] Chrome launched successfully");
 
     // Handler must be polled continuously — spawn it
