@@ -169,29 +169,37 @@ async fn wait_for_spawned_daemon(
 }
 
 /// Stop the daemon by sending SIGTERM to the PID in the pidfile.
+/// Treats an already-dead process as success and always cleans up stale files.
 pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
     let pid_file = pid_path_for(session);
     if !pid_file.exists() {
-        return Err("daemon not running (no PID file)".into());
+        // No PID file — clean up socket if leftover and treat as success
+        let _ = fs::remove_file(socket_path_for(session));
+        return Ok(());
     }
 
     let pid_str = fs::read_to_string(&pid_file)?;
     let pid: i32 = pid_str.trim().parse().map_err(|_| "invalid PID file")?;
 
-    nix::sys::signal::kill(
+    match nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid),
         nix::sys::signal::Signal::SIGTERM,
-    )
-    .map_err(|e| format!("failed to stop daemon (PID {pid}): {e}"))?;
-
-    // Wait briefly for cleanup
-    std::thread::sleep(Duration::from_millis(500));
-
-    // Clean up if process is gone
-    if nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_err() {
-        let _ = fs::remove_file(pid_path_for(session));
-        let _ = fs::remove_file(socket_path_for(session));
+    ) {
+        Ok(()) => {
+            // Signal sent — wait briefly for process to exit
+            std::thread::sleep(Duration::from_millis(500));
+        }
+        Err(nix::errno::Errno::ESRCH) => {
+            // Process already dead — that's fine, we just need to clean up
+        }
+        Err(e) => {
+            return Err(format!("failed to stop daemon (PID {pid}): {e}").into());
+        }
     }
+
+    // Always clean up stale files
+    let _ = fs::remove_file(pid_path_for(session));
+    let _ = fs::remove_file(socket_path_for(session));
 
     Ok(())
 }
