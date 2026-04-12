@@ -57,6 +57,23 @@ gsd-browser network                    # Check BEFORE next navigation
 
 </error>
 
+<error name="session_about_blank">
+
+**Error:** `session-summary` or `list-pages` shows `about:blank` after navigating.
+
+**Cause:** On versions before v0.1.7, the page registry did not sync metadata after navigation. The browser was on the correct page but the registry still reported the initial `about:blank`.
+
+**Fix:** Upgrade to v0.1.7+. If stuck on an older version, use batch to keep everything in one daemon connection:
+
+```bash
+gsd-browser batch --steps '[
+  {"action": "navigate", "url": "https://example.com"},
+  {"action": "assert", "checks": [{"kind": "url_contains", "text": "example"}]}
+]'
+```
+
+</error>
+
 <error name="daemon_wont_start">
 
 **Error:** `daemon did not start within 10s`

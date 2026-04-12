@@ -87,7 +87,7 @@ gsd-browser assert --checks '[
 ]'
 ```
 
-**All kinds:** `url_contains`, `text_visible`, `text_hidden`, `selector_visible`, `selector_hidden`, `value_equals`, `no_console_errors`, `no_failed_requests`, `request_url_seen`, `response_status`, `console_message_matches`, `network_count`, `console_count`, `no_console_errors_since`, `no_failed_requests_since`, `element_count`
+**All kinds (17):** `url_contains`, `text_visible`, `text_hidden`, `selector_visible`, `selector_hidden`, `value_equals`, `checked`, `no_console_errors`, `no_failed_requests`, `request_url_seen`, `response_status`, `console_message_matches`, `network_count`, `console_count`, `element_count`, `no_console_errors_since`, `no_failed_requests_since`
 
 </assertions>
 
@@ -314,6 +314,6 @@ gsd-browser daemon stop
 gsd-browser daemon start
 ```
 
-The daemon auto-starts on first command. Manual management is rarely needed.
+The daemon auto-starts on first command. `daemon stop` is idempotent — safe to call even if the process is already dead.
 
 </daemon_management>

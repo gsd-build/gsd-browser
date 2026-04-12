@@ -16,10 +16,11 @@ allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 
 ## Critical Rules
 
-1. **The daemon auto-starts.** Never run `gsd-browser daemon start` — it starts on first command. Only use `daemon stop` to clean up.
+1. **The daemon auto-starts.** It starts on first command. Use `daemon stop` to clean up. Use `daemon start` only if you need to pre-warm the browser before issuing commands.
 2. **Always re-snapshot after page changes.** Refs are versioned (`@v1:e1`). After navigation, form submission, or dynamic content loading, old refs are stale. Run `gsd-browser snapshot` to get fresh refs.
 3. **Use `--json` when parsing output.** Use text mode when reading output yourself. Use `--json` when you need to extract values programmatically (e.g., checking assertion results, parsing snapshot refs).
 4. **Positional args have no flag prefix.** Commands like `click`, `type`, `hover` take positional args — do NOT add `--selector`. See exact syntax in command reference below.
+5. **Prefer `batch` for multi-step flows.** Batch executes all steps in a single daemon connection, avoiding any session edge cases. Use separate commands only when you need to parse intermediate output (e.g., snapshot to discover refs).
 
 ## Core Workflow
 
@@ -157,7 +158,7 @@ gsd-browser assert --checks '[
 ]'
 ```
 
-**Assertion kinds:** `url_contains`, `text_visible`, `text_hidden`, `selector_visible`, `selector_hidden`, `value_equals`, `no_console_errors`, `no_failed_requests`, `request_url_seen`, `response_status`, `console_message_matches`, `network_count`, `console_count`, `no_console_errors_since`, `no_failed_requests_since`, `element_count`.
+**Assertion kinds (17):** `url_contains`, `text_visible`, `text_hidden`, `selector_visible`, `selector_hidden`, `value_equals`, `checked`, `no_console_errors`, `no_failed_requests`, `request_url_seen`, `response_status`, `console_message_matches`, `network_count`, `console_count`, `element_count`, `no_console_errors_since`, `no_failed_requests_since`.
 
 ### Batch Execution
 
@@ -403,12 +404,12 @@ gsd-browser action-cache --action clear            # Flush cache
 
 ### Daemon Management
 
-The daemon auto-starts on first command. You almost never need these.
+The daemon auto-starts on first command. These are for explicit lifecycle control.
 
 ```bash
-gsd-browser daemon stop                            # Stop daemon (clean up when done)
+gsd-browser daemon stop                            # Stop daemon (idempotent — safe on dead processes)
 gsd-browser daemon health                          # Health check (returns PID)
-gsd-browser daemon start                           # Explicit start (rarely needed)
+gsd-browser daemon start                           # Explicit start (pre-warm browser before commands)
 ```
 
 ---
@@ -472,6 +473,17 @@ Many sites show consent banners that block clicks. Dismiss them first:
 ```bash
 gsd-browser act --intent accept_cookies            # Auto-find and click accept button
 gsd-browser act --intent dismiss                   # Or dismiss generic overlays
+```
+
+### Session shows about:blank or 0 actions
+
+If `session-summary` or `list-pages` reports `about:blank` after you navigated, the page registry lost sync. This was fixed in v0.1.7. If running an older version, use batch as a workaround:
+
+```bash
+gsd-browser batch --steps '[
+  {"action": "navigate", "url": "https://example.com"},
+  {"action": "assert", "checks": [{"kind": "url_contains", "text": "example"}]}
+]'
 ```
 
 ### Daemon won't start
