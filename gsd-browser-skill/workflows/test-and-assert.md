@@ -44,6 +44,7 @@ gsd-browser assert --checks '[
 | `selector_visible` | `selector` | Element is visible |
 | `selector_hidden` | `selector` | Element is NOT visible |
 | `value_equals` | `selector`, `value` | Input value matches |
+| `checked` | `selector` | Checkbox/radio is checked |
 | `element_count` | `selector`, `min`/`max`/`exact` | Element count in range |
 | `no_console_errors` | - | No console errors logged |
 | `no_failed_requests` | - | No failed network requests |
