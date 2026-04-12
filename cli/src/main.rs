@@ -6,7 +6,7 @@ use clap::{Parser, Subcommand};
 use gsd_browser_common::config::Config;
 
 #[derive(Parser)]
-#[command(name = "gsd-browser", about = "Browser automation CLI powered by CDP")]
+#[command(name = "gsd-browser", version, about = "Browser automation CLI powered by CDP")]
 pub struct Cli {
     /// Output as JSON
     #[arg(long, global = true)]
