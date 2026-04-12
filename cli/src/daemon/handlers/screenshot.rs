@@ -18,10 +18,7 @@ pub async fn handle_screenshot(page: &Page, params: &Value) -> Result<Value, Str
         .get("full_page")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let quality = params
-        .get("quality")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(80) as i64;
+    let quality = params.get("quality").and_then(|v| v.as_u64()).unwrap_or(80) as i64;
     let format_str = params
         .get("format")
         .and_then(|v| v.as_str())

@@ -8,8 +8,8 @@
 use crate::daemon::logs::DaemonLogs;
 use crate::daemon::state::DaemonState;
 use base64::Engine as _;
-use chrono::Local;
 use chromiumoxide::Page;
+use chrono::Local;
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
@@ -27,10 +27,7 @@ const MAX_TIMELINE_ENTRIES: usize = 60;
 /// - dialog count
 /// - active page info (url, title)
 /// - bounded-history caveat flag
-pub fn handle_session_summary(
-    logs: &DaemonLogs,
-    state: &DaemonState,
-) -> Result<Value, String> {
+pub fn handle_session_summary(logs: &DaemonLogs, state: &DaemonState) -> Result<Value, String> {
     debug!("handle_session_summary: aggregating state");
 
     // Timeline aggregation
@@ -81,10 +78,7 @@ pub fn handle_session_summary(
     // Active page info
     let pages = state.pages.lock().unwrap();
     let (active_url, active_title, page_count, active_page_id) = {
-        let active = pages
-            .entries
-            .iter()
-            .find(|e| e.id == pages.active_page_id);
+        let active = pages.entries.iter().find(|e| e.id == pages.active_page_id);
         match active {
             Some(entry) => (
                 entry.url.clone(),
@@ -153,10 +147,7 @@ pub async fn handle_debug_bundle(
     state: &DaemonState,
     params: &Value,
 ) -> Result<Value, String> {
-    let custom_name = params
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let custom_name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
 
     // Determine artifact root
     let artifact_root = std::env::var("GSD_BROWSER_ARTIFACT_DIR")
@@ -181,10 +172,7 @@ pub async fn handle_debug_bundle(
     fs::create_dir_all(&bundle_dir)
         .map_err(|e| format!("failed to create debug bundle directory: {e}"))?;
 
-    debug!(
-        "handle_debug_bundle: writing to {}",
-        bundle_dir.display()
-    );
+    debug!("handle_debug_bundle: writing to {}", bundle_dir.display());
 
     let mut files_written: Vec<String> = Vec::new();
 
@@ -250,8 +238,7 @@ pub async fn handle_debug_bundle(
     {
         let timeline = state.timeline.lock().unwrap();
         let entries = timeline.snapshot();
-        let json_str =
-            serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
+        let json_str = serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
         let path = bundle_dir.join("timeline.json");
         if let Err(e) = fs::write(&path, &json_str) {
             warn!("debug_bundle: failed to write timeline.json: {e}");

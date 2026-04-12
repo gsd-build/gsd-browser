@@ -42,7 +42,12 @@ pub fn find_chrome(override_path: Option<&str>) -> Result<PathBuf, String> {
     }
 
     // 3. PATH search
-    let candidates = ["google-chrome", "google-chrome-stable", "chromium-browser", "chromium"];
+    let candidates = [
+        "google-chrome",
+        "google-chrome-stable",
+        "chromium-browser",
+        "chromium",
+    ];
     for name in &candidates {
         if let Ok(path) = which::which(name) {
             return Ok(path);
@@ -50,6 +55,7 @@ pub fn find_chrome(override_path: Option<&str>) -> Result<PathBuf, String> {
     }
 
     Err(
-        "Chrome not found. Install Google Chrome or pass --browser-path /path/to/chrome".to_string(),
+        "Chrome not found. Install Google Chrome or pass --browser-path /path/to/chrome"
+            .to_string(),
     )
 }

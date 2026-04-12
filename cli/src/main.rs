@@ -2,8 +2,8 @@ mod daemon;
 mod daemon_client;
 mod output;
 
-use gsd_browser_common::config::Config;
 use clap::{Parser, Subcommand};
+use gsd_browser_common::config::Config;
 
 #[derive(Parser)]
 #[command(name = "gsd-browser", about = "Browser automation CLI powered by CDP")]
@@ -598,7 +598,10 @@ async fn main() {
     }
 
     let result = match &cli.command {
-        Commands::Serve { browser_path, session } => {
+        Commands::Serve {
+            browser_path,
+            session,
+        } => {
             if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
                 eprintln!("[gsd-browser-daemon] fatal: {e}");
                 std::process::exit(1);
@@ -669,21 +672,48 @@ async fn main() {
             text,
             selector,
             limit,
-        } => cmd_find(&cli, role.as_deref(), text.as_deref(), selector.as_deref(), *limit).await,
+        } => {
+            cmd_find(
+                &cli,
+                role.as_deref(),
+                text.as_deref(),
+                selector.as_deref(),
+                *limit,
+            )
+            .await
+        }
         Commands::PageSource { selector } => cmd_page_source(&cli, selector.as_deref()).await,
         Commands::WaitFor {
             condition,
             value,
             threshold,
             timeout,
-        } => cmd_wait_for(&cli, condition, value.as_deref(), threshold.as_deref(), *timeout).await,
+        } => {
+            cmd_wait_for(
+                &cli,
+                condition,
+                value.as_deref(),
+                threshold.as_deref(),
+                *timeout,
+            )
+            .await
+        }
         Commands::Timeline { write_to_disk } => cmd_timeline(&cli, *write_to_disk).await,
         Commands::Snapshot {
             selector,
             interactive_only,
             limit,
             mode,
-        } => cmd_snapshot(&cli, selector.as_deref(), *interactive_only, *limit, mode.as_deref()).await,
+        } => {
+            cmd_snapshot(
+                &cli,
+                selector.as_deref(),
+                *interactive_only,
+                *limit,
+                mode.as_deref(),
+            )
+            .await
+        }
         Commands::GetRef { ref_str } => cmd_get_ref(&cli, ref_str).await,
         Commands::ClickRef { ref_str } => cmd_click_ref(&cli, ref_str).await,
         Commands::HoverRef { ref_str } => cmd_hover_ref(&cli, ref_str).await,
@@ -710,17 +740,13 @@ async fn main() {
             index,
             url_pattern,
         } => cmd_select_frame(&cli, name.as_deref(), *index, url_pattern.as_deref()).await,
-        Commands::AnalyzeForm { selector } => {
-            cmd_analyze_form(&cli, selector.as_deref()).await
-        }
+        Commands::AnalyzeForm { selector } => cmd_analyze_form(&cli, selector.as_deref()).await,
         Commands::FillForm {
             values,
             selector,
             submit,
         } => cmd_fill_form(&cli, values, selector.as_deref(), *submit).await,
-        Commands::FindBest { intent, scope } => {
-            cmd_find_best(&cli, intent, scope.as_deref()).await
-        }
+        Commands::FindBest { intent, scope } => cmd_find_best(&cli, intent, scope.as_deref()).await,
         Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
@@ -729,7 +755,16 @@ async fn main() {
             selector,
             threshold,
             update_baseline,
-        } => cmd_visual_diff(&cli, name.as_deref(), selector.as_deref(), *threshold, *update_baseline).await,
+        } => {
+            cmd_visual_diff(
+                &cli,
+                name.as_deref(),
+                selector.as_deref(),
+                *threshold,
+                *update_baseline,
+            )
+            .await
+        }
         Commands::ZoomRegion {
             x,
             y,
@@ -742,7 +777,16 @@ async fn main() {
             print_background,
             filename,
             output,
-        } => cmd_save_pdf(&cli, format, *print_background, filename.as_deref(), output.as_deref()).await,
+        } => {
+            cmd_save_pdf(
+                &cli,
+                format,
+                *print_background,
+                filename.as_deref(),
+                output.as_deref(),
+            )
+            .await
+        }
         Commands::Extract {
             schema,
             selector,
@@ -755,7 +799,18 @@ async fn main() {
             content_type,
             delay,
             headers,
-        } => cmd_mock_route(&cli, url, *status, body.as_deref(), content_type.as_deref(), *delay, headers.as_deref()).await,
+        } => {
+            cmd_mock_route(
+                &cli,
+                url,
+                *status,
+                body.as_deref(),
+                content_type.as_deref(),
+                *delay,
+                headers.as_deref(),
+            )
+            .await
+        }
         Commands::BlockUrls { patterns } => cmd_block_urls(&cli, patterns).await,
         Commands::ClearRoutes => cmd_clear_routes(&cli).await,
         Commands::EmulateDevice { device } => cmd_emulate_device(&cli, device).await,
@@ -767,7 +822,17 @@ async fn main() {
             username,
             password,
             extra_fields,
-        } => cmd_vault_save(&cli, &profile, &url, &username, &password, extra_fields.as_deref()).await,
+        } => {
+            cmd_vault_save(
+                &cli,
+                &profile,
+                &url,
+                &username,
+                &password,
+                extra_fields.as_deref(),
+            )
+            .await
+        }
         Commands::VaultLogin { profile } => cmd_vault_login(&cli, &profile).await,
         Commands::VaultList => cmd_vault_list(&cli).await,
         Commands::ActionCache {
@@ -775,7 +840,16 @@ async fn main() {
             intent,
             selector,
             score,
-        } => cmd_action_cache(&cli, &action, intent.as_deref(), selector.as_deref(), *score).await,
+        } => {
+            cmd_action_cache(
+                &cli,
+                &action,
+                intent.as_deref(),
+                selector.as_deref(),
+                *score,
+            )
+            .await
+        }
         Commands::CheckInjection { include_hidden } => {
             cmd_check_injection(&cli, *include_hidden).await
         }
@@ -828,9 +902,13 @@ async fn cmd_daemon_stop(cli: &Cli) -> CmdResult {
 }
 
 async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("health", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "health",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     if let Some(result) = resp.result {
         if cli.json {
             println!("{}", output::format_json(&result));
@@ -862,30 +940,42 @@ async fn cmd_navigate(cli: &Cli, url: &str) -> CmdResult {
         "navigate",
         serde_json::json!({"url": url}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_navigate)
 }
 
 async fn cmd_back(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("back", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "back",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_back)
 }
 
 async fn cmd_forward(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("forward", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "forward",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_forward)
 }
 
 async fn cmd_reload(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("reload", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "reload",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_reload)
 }
 
@@ -894,7 +984,7 @@ async fn cmd_console(cli: &Cli, no_clear: bool) -> CmdResult {
         "console",
         serde_json::json!({"clear": !no_clear}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_console)
@@ -905,7 +995,7 @@ async fn cmd_network(cli: &Cli, no_clear: bool, filter: &str) -> CmdResult {
         "network",
         serde_json::json!({"clear": !no_clear, "filter": filter}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_network)
@@ -916,7 +1006,7 @@ async fn cmd_dialog(cli: &Cli, no_clear: bool) -> CmdResult {
         "dialog",
         serde_json::json!({"clear": !no_clear}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_dialog)
@@ -927,7 +1017,7 @@ async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
         "eval",
         serde_json::json!({"expression": expression}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_eval)
@@ -944,7 +1034,13 @@ async fn cmd_click(cli: &Cli, selector: Option<&str>, x: Option<f64>, y: Option<
     if let Some(yv) = y {
         params["y"] = serde_json::json!(yv);
     }
-    let resp = daemon_client::send_request("click", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "click",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_interaction)
 }
 
@@ -966,7 +1062,7 @@ async fn cmd_type(
             "submit": submit,
         }),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -977,7 +1073,7 @@ async fn cmd_press(cli: &Cli, key: &str) -> CmdResult {
         "press",
         serde_json::json!({"key": key}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -988,7 +1084,7 @@ async fn cmd_hover(cli: &Cli, selector: &str) -> CmdResult {
         "hover",
         serde_json::json!({"selector": selector}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -999,7 +1095,7 @@ async fn cmd_scroll(cli: &Cli, direction: &str, amount: i32) -> CmdResult {
         "scroll",
         serde_json::json!({"direction": direction, "amount": amount}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_scroll)
@@ -1010,7 +1106,7 @@ async fn cmd_select_option(cli: &Cli, selector: &str, option: &str) -> CmdResult
         "select_option",
         serde_json::json!({"selector": selector, "option": option}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -1021,7 +1117,7 @@ async fn cmd_set_checked(cli: &Cli, selector: &str, checked: bool) -> CmdResult 
         "set_checked",
         serde_json::json!({"selector": selector, "checked": checked}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -1032,7 +1128,7 @@ async fn cmd_drag(cli: &Cli, source: &str, target: &str) -> CmdResult {
         "drag",
         serde_json::json!({"source": source, "target": target}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -1054,8 +1150,13 @@ async fn cmd_set_viewport(
     if let Some(h) = height {
         params["height"] = serde_json::json!(h);
     }
-    let resp =
-        daemon_client::send_request("set_viewport", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "set_viewport",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_viewport)
 }
 
@@ -1064,7 +1165,7 @@ async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResu
         "upload_file",
         serde_json::json!({"selector": selector, "files": files}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_interaction)
@@ -1087,8 +1188,13 @@ async fn cmd_screenshot(
         params["selector"] = serde_json::json!(sel);
     }
 
-    let resp =
-        daemon_client::send_request("screenshot", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "screenshot",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
 
     if let Some(err) = resp.error {
         if cli.json {
@@ -1141,8 +1247,13 @@ async fn cmd_accessibility_tree(
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp = daemon_client::send_request("accessibility_tree", params, cli.browser_path.as_deref(), cli.session.as_deref())
-        .await?;
+    let resp = daemon_client::send_request(
+        "accessibility_tree",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_accessibility_tree)
 }
 
@@ -1163,8 +1274,13 @@ async fn cmd_find(
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp =
-        daemon_client::send_request("find", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "find",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_find)
 }
 
@@ -1173,8 +1289,13 @@ async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp =
-        daemon_client::send_request("page_source", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "page_source",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_page_source)
 }
 
@@ -1195,8 +1316,13 @@ async fn cmd_wait_for(
     if let Some(ms) = timeout {
         params["timeout"] = serde_json::json!(ms);
     }
-    let resp =
-        daemon_client::send_request("wait_for", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "wait_for",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_wait_for)
 }
 
@@ -1205,7 +1331,7 @@ async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
         "timeline",
         serde_json::json!({"write_to_disk": write_to_disk}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_timeline)
@@ -1228,8 +1354,13 @@ async fn cmd_snapshot(
     if let Some(m) = mode {
         params["mode"] = serde_json::json!(m);
     }
-    let resp =
-        daemon_client::send_request("snapshot", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "snapshot",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_snapshot)
 }
 
@@ -1238,7 +1369,7 @@ async fn cmd_get_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "get_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_get_ref)
@@ -1249,7 +1380,7 @@ async fn cmd_click_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "click_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_ref_action)
@@ -1260,7 +1391,7 @@ async fn cmd_hover_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "hover_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_ref_action)
@@ -1284,7 +1415,7 @@ async fn cmd_fill_ref(
             "slowly": slowly,
         }),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_ref_action)
@@ -1298,7 +1429,7 @@ async fn cmd_assert(cli: &Cli, checks: &str) -> CmdResult {
         "assert",
         serde_json::json!({"checks": checks_value}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_assert)
@@ -1309,8 +1440,13 @@ async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
     if let Some(id) = since {
         params["sinceActionId"] = serde_json::json!(id);
     }
-    let resp =
-        daemon_client::send_request("diff", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "diff",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_diff)
 }
 
@@ -1326,16 +1462,20 @@ async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: 
             "summary_only": summary_only,
         }),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_batch)
 }
 
 async fn cmd_list_pages(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("list_pages", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "list_pages",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_list_pages)
 }
 
@@ -1344,7 +1484,7 @@ async fn cmd_switch_page(cli: &Cli, id: u64) -> CmdResult {
         "switch_page",
         serde_json::json!({"id": id}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_switch_page)
@@ -1355,16 +1495,20 @@ async fn cmd_close_page(cli: &Cli, id: u64) -> CmdResult {
         "close_page",
         serde_json::json!({"id": id}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_close_page)
 }
 
 async fn cmd_list_frames(cli: &Cli) -> CmdResult {
-    let resp =
-        daemon_client::send_request("list_frames", serde_json::json!({}), cli.browser_path.as_deref(), cli.session.as_deref())
-            .await?;
+    let resp = daemon_client::send_request(
+        "list_frames",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_list_frames)
 }
 
@@ -1384,8 +1528,13 @@ async fn cmd_select_frame(
     if let Some(pat) = url_pattern {
         params["urlPattern"] = serde_json::json!(pat);
     }
-    let resp =
-        daemon_client::send_request("select_frame", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "select_frame",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_select_frame)
 }
 
@@ -1394,8 +1543,13 @@ async fn cmd_analyze_form(cli: &Cli, selector: Option<&str>) -> CmdResult {
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp =
-        daemon_client::send_request("analyze_form", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "analyze_form",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_analyze_form)
 }
 
@@ -1409,8 +1563,13 @@ async fn cmd_fill_form(cli: &Cli, values: &str, selector: Option<&str>, submit: 
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp =
-        daemon_client::send_request("fill_form", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "fill_form",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_fill_form)
 }
 
@@ -1419,8 +1578,13 @@ async fn cmd_find_best(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResul
     if let Some(s) = scope {
         params["scope"] = serde_json::json!(s);
     }
-    let resp =
-        daemon_client::send_request("find_best", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "find_best",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_find_best)
 }
 
@@ -1429,8 +1593,13 @@ async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     if let Some(s) = scope {
         params["scope"] = serde_json::json!(s);
     }
-    let resp =
-        daemon_client::send_request("act", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "act",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_act)
 }
 
@@ -1439,7 +1608,7 @@ async fn cmd_session_summary(cli: &Cli) -> CmdResult {
         "session_summary",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_session_summary)
@@ -1454,7 +1623,7 @@ async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
         "debug_bundle",
         params,
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_debug_bundle)
@@ -1479,11 +1648,24 @@ async fn cmd_visual_diff(
     if let Some(t) = threshold {
         params["threshold"] = serde_json::json!(t);
     }
-    let resp = daemon_client::send_request("visual_diff", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "visual_diff",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_visual_diff)
 }
 
-async fn cmd_zoom_region(cli: &Cli, x: f64, y: f64, width: f64, height: f64, scale: f64) -> CmdResult {
+async fn cmd_zoom_region(
+    cli: &Cli,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    scale: f64,
+) -> CmdResult {
     let resp = daemon_client::send_request(
         "zoom_region",
         serde_json::json!({
@@ -1494,7 +1676,7 @@ async fn cmd_zoom_region(cli: &Cli, x: f64, y: f64, width: f64, height: f64, sca
             "scale": scale,
         }),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_zoom_region)
@@ -1517,7 +1699,13 @@ async fn cmd_save_pdf(
     if let Some(o) = output {
         params["output"] = serde_json::json!(o);
     }
-    let resp = daemon_client::send_request("save_pdf", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "save_pdf",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_save_pdf)
 }
 
@@ -1531,7 +1719,13 @@ async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: 
     if let Some(sel) = selector {
         params["selector"] = serde_json::json!(sel);
     }
-    let resp = daemon_client::send_request("extract", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "extract",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_extract)
 }
 
@@ -1562,7 +1756,13 @@ async fn cmd_mock_route(
             serde_json::from_str(h).map_err(|e| format!("invalid headers JSON: {e}"))?;
         params["headers"] = headers_value;
     }
-    let resp = daemon_client::send_request("mock_route", params, cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    let resp = daemon_client::send_request(
+        "mock_route",
+        params,
+        cli.browser_path.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     handle_response(cli, resp, output::format_text_mock_route)
 }
 
@@ -1571,7 +1771,7 @@ async fn cmd_block_urls(cli: &Cli, patterns: &[String]) -> CmdResult {
         "block_urls",
         serde_json::json!({"patterns": patterns}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_block_urls)
@@ -1582,7 +1782,7 @@ async fn cmd_clear_routes(cli: &Cli) -> CmdResult {
         "clear_routes",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
-    cli.session.as_deref(),
+        cli.session.as_deref(),
     )
     .await?;
     handle_response(cli, resp, output::format_text_clear_routes)

@@ -126,8 +126,7 @@ pub async fn handle_restore_state(page: &Page, params: &Value) -> Result<Value, 
         ));
     }
 
-    let json_str =
-        fs::read_to_string(&file_path).map_err(|e| format!("read state file: {e}"))?;
+    let json_str = fs::read_to_string(&file_path).map_err(|e| format!("read state file: {e}"))?;
     let state: BrowserState =
         serde_json::from_str(&json_str).map_err(|e| format!("parse state file: {e}"))?;
 
@@ -158,16 +157,16 @@ pub async fn handle_restore_state(page: &Page, params: &Value) -> Result<Value, 
 
         if !cookie_params.is_empty() {
             page.execute(SetCookiesParams::new(cookie_params))
-            .await
-            .map_err(|e| format!("SetCookies failed: {e}"))?;
+                .await
+                .map_err(|e| format!("SetCookies failed: {e}"))?;
         }
     }
 
     // 2. Restore localStorage via JS
     if let Value::Object(map) = &state.local_storage {
         if !map.is_empty() {
-            let ls_json = serde_json::to_string(map)
-                .map_err(|e| format!("serialize localStorage: {e}"))?;
+            let ls_json =
+                serde_json::to_string(map).map_err(|e| format!("serialize localStorage: {e}"))?;
             let js = format!(
                 r#"(() => {{
                     const items = JSON.parse({ls_json_str});
@@ -187,8 +186,8 @@ pub async fn handle_restore_state(page: &Page, params: &Value) -> Result<Value, 
     // 3. Restore sessionStorage via JS
     if let Value::Object(map) = &state.session_storage {
         if !map.is_empty() {
-            let ss_json = serde_json::to_string(map)
-                .map_err(|e| format!("serialize sessionStorage: {e}"))?;
+            let ss_json =
+                serde_json::to_string(map).map_err(|e| format!("serialize sessionStorage: {e}"))?;
             let js = format!(
                 r#"(() => {{
                     const items = JSON.parse({ss_json_str});

@@ -4,8 +4,8 @@
 //! Executes a single JS expression in the page context and deserializes the
 //! result into `CompactPageState`.
 
-use gsd_browser_common::types::CompactPageState;
 use chromiumoxide::Page;
+use gsd_browser_common::types::CompactPageState;
 use std::time::{Duration, Instant};
 use tokio::time::timeout;
 use tracing::{debug, warn};
@@ -56,10 +56,7 @@ const CAPTURE_PAGE_STATE_JS: &str = r#"((includeBodyText) => {
 /// Executes JS in the page context to gather title, URL, focus state, headings,
 /// element counts, dialog state, and optional body text. Returns defaults on
 /// error or timeout rather than failing.
-pub async fn capture_compact_page_state(
-    page: &Page,
-    include_body_text: bool,
-) -> CompactPageState {
+pub async fn capture_compact_page_state(page: &Page, include_body_text: bool) -> CompactPageState {
     let started_at = Instant::now();
     let arg = if include_body_text { "true" } else { "false" };
     let js = format!("{CAPTURE_PAGE_STATE_JS}({arg})");

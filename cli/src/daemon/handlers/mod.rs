@@ -35,7 +35,7 @@ pub fn clean_cdp_error(err: &impl std::fmt::Display) -> String {
     // Pattern: description: Some("Error: ...")
     if let Some(start) = raw.find("description: Some(\"") {
         let after = &raw[start + 19..]; // skip 'description: Some("'
-        // Find the closing '")' — account for escaped quotes
+                                        // Find the closing '")' — account for escaped quotes
         let mut end = 0;
         let chars: Vec<char> = after.chars().collect();
         let mut i = 0;

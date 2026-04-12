@@ -202,7 +202,10 @@ async fn spawn_fetch_listener(page: &Page, store: &Mutex<crate::daemon::state::M
                         .collect();
 
                     // Add Content-Type if not already present
-                    if !headers.iter().any(|h| h.name.eq_ignore_ascii_case("content-type")) {
+                    if !headers
+                        .iter()
+                        .any(|h| h.name.eq_ignore_ascii_case("content-type"))
+                    {
                         headers.push(HeaderEntry::new(
                             "Content-Type",
                             if route.content_type.is_empty() {
@@ -233,10 +236,7 @@ async fn spawn_fetch_listener(page: &Page, store: &Mutex<crate::daemon::state::M
                 }
                 _ => {
                     // No match — continue the request normally
-                    if let Err(e) = page
-                        .execute(ContinueRequestParams::new(request_id))
-                        .await
-                    {
+                    if let Err(e) = page.execute(ContinueRequestParams::new(request_id)).await {
                         warn!("fetch_listener: ContinueRequest error: {e}");
                     }
                 }
@@ -258,19 +258,13 @@ pub async fn handle_mock_route(
         .get("url")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing required parameter: url".to_string())?;
-    let status = params
-        .get("status")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(200) as u16;
+    let status = params.get("status").and_then(|v| v.as_u64()).unwrap_or(200) as u16;
     let body = params
         .get("body")
         .and_then(|v| v.as_str())
         .unwrap_or("")
         .to_string();
-    let delay_ms = params
-        .get("delay")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let delay_ms = params.get("delay").and_then(|v| v.as_u64()).unwrap_or(0);
     let content_type = params
         .get("content_type")
         .or_else(|| params.get("contentType"))
@@ -397,22 +391,43 @@ mod tests {
 
     #[test]
     fn glob_exact_match() {
-        assert!(glob_matches("https://example.com/api/users", "https://example.com/api/users"));
-        assert!(!glob_matches("https://example.com/api/users", "https://example.com/api/posts"));
+        assert!(glob_matches(
+            "https://example.com/api/users",
+            "https://example.com/api/users"
+        ));
+        assert!(!glob_matches(
+            "https://example.com/api/users",
+            "https://example.com/api/posts"
+        ));
     }
 
     #[test]
     fn glob_star_match() {
-        assert!(glob_matches("**/api/users*", "https://example.com/api/users?page=1"));
+        assert!(glob_matches(
+            "**/api/users*",
+            "https://example.com/api/users?page=1"
+        ));
         assert!(glob_matches("**/api/*", "https://example.com/api/anything"));
-        assert!(glob_matches("https://example.com/*", "https://example.com/anything"));
+        assert!(glob_matches(
+            "https://example.com/*",
+            "https://example.com/anything"
+        ));
     }
 
     #[test]
     fn glob_double_star_match() {
-        assert!(glob_matches("**/analytics**", "https://example.com/analytics/track?id=1"));
-        assert!(glob_matches("**analytics**", "https://example.com/analytics"));
-        assert!(!glob_matches("**/analytics**", "https://example.com/api/users"));
+        assert!(glob_matches(
+            "**/analytics**",
+            "https://example.com/analytics/track?id=1"
+        ));
+        assert!(glob_matches(
+            "**analytics**",
+            "https://example.com/analytics"
+        ));
+        assert!(!glob_matches(
+            "**/analytics**",
+            "https://example.com/api/users"
+        ));
     }
 
     #[test]

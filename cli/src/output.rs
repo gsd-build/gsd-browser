@@ -20,10 +20,7 @@ use serde_json::Value;
 fn format_compact_summary(state: &Value) -> String {
     let mut lines = Vec::new();
 
-    let title = state
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let title = state.get("title").and_then(|v| v.as_str()).unwrap_or("");
     let url = state.get("url").and_then(|v| v.as_str()).unwrap_or("");
 
     lines.push(format!("Title: {title}"));
@@ -31,7 +28,10 @@ fn format_compact_summary(state: &Value) -> String {
 
     // Element counts
     if let Some(counts) = state.get("counts") {
-        let landmarks = counts.get("landmarks").and_then(|v| v.as_u64()).unwrap_or(0);
+        let landmarks = counts
+            .get("landmarks")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let buttons = counts.get("buttons").and_then(|v| v.as_u64()).unwrap_or(0);
         let links = counts.get("links").and_then(|v| v.as_u64()).unwrap_or(0);
         let inputs = counts.get("inputs").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -170,15 +170,9 @@ pub fn format_text_network(result: &Value) -> String {
                     let status = e.get("status").and_then(|v| v.as_u64()).unwrap_or(0);
                     let method = e.get("method").and_then(|v| v.as_str()).unwrap_or("???");
                     let url = e.get("url").and_then(|v| v.as_str()).unwrap_or("");
-                    let rtype = e
-                        .get("resourceType")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let rtype = e.get("resourceType").and_then(|v| v.as_str()).unwrap_or("");
                     let failed = e.get("failed").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let failure = e
-                        .get("failureText")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let failure = e.get("failureText").and_then(|v| v.as_str()).unwrap_or("");
 
                     if failed && !failure.is_empty() {
                         format!("[FAILED] {method} {url} ({rtype}) — {failure}")
@@ -248,10 +242,7 @@ pub fn format_text_interaction(result: &Value) -> String {
         }
     }
     if let Some(typed) = result.get("typed") {
-        let sel = typed
-            .get("selector")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let sel = typed.get("selector").and_then(|v| v.as_str()).unwrap_or("");
         let len = typed
             .get("text_length")
             .and_then(|v| v.as_u64())
@@ -299,14 +290,8 @@ pub fn format_text_interaction(result: &Value) -> String {
         lines.push(format!("Checked: {sel} = {val}"));
     }
     if let Some(dragged) = result.get("dragged") {
-        let src = dragged
-            .get("source")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let tgt = dragged
-            .get("target")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let src = dragged.get("source").and_then(|v| v.as_str()).unwrap_or("");
+        let tgt = dragged.get("target").and_then(|v| v.as_str()).unwrap_or("");
         lines.push(format!("Dragged: {src} → {tgt}"));
     }
     if let Some(uploaded) = result.get("uploaded") {
@@ -342,18 +327,13 @@ pub fn format_text_scroll(result: &Value) -> String {
             .get("percentage")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
-        let height = scroll
-            .get("height")
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+        let height = scroll.get("height").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let vp = scroll
             .get("viewport_height")
             .and_then(|v| v.as_f64())
             .unwrap_or(0.0);
         lines.push(format!("Scroll position: {y}px ({pct}%)"));
-        lines.push(format!(
-            "Page height: {height}px, viewport: {vp}px"
-        ));
+        lines.push(format!("Page height: {height}px, viewport: {vp}px"));
     }
 
     if let Some(state) = result.get("state") {
@@ -404,10 +384,7 @@ pub fn format_text_screenshot(result: &Value) -> String {
 
 /// Format accessibility tree in text mode — print the indented tree with a node count footer.
 pub fn format_text_accessibility_tree(result: &Value) -> String {
-    let tree = result
-        .get("tree")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let tree = result.get("tree").and_then(|v| v.as_str()).unwrap_or("");
     let node_count = result
         .get("nodeCount")
         .and_then(|v| v.as_u64())
@@ -454,10 +431,7 @@ pub fn format_text_find(result: &Value) -> String {
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
                     let tag = e.get("tag").and_then(|v| v.as_str()).unwrap_or("");
-                    let visible = e
-                        .get("visible")
-                        .and_then(|v| v.as_bool())
-                        .unwrap_or(true);
+                    let visible = e.get("visible").and_then(|v| v.as_bool()).unwrap_or(true);
 
                     let role_display = if role.is_empty() { tag } else { role };
                     let vis = if !visible { " [hidden]" } else { "" };
@@ -549,10 +523,7 @@ pub fn format_text_wait_for(result: &Value) -> String {
         .get("timeout_ms")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    let value = result
-        .get("value")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let value = result.get("value").and_then(|v| v.as_str()).unwrap_or("");
 
     let status = if met { "✓ met" } else { "✗ timeout" };
 
@@ -577,14 +548,8 @@ pub fn format_text_timeline(result: &Value) -> String {
             lines.push("-".repeat(60));
             for e in entries {
                 let id = e.get("id").and_then(|v| v.as_u64()).unwrap_or(0);
-                let tool = e
-                    .get("tool")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
-                let status = e
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("?");
+                let tool = e.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+                let status = e.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                 let params = e
                     .get("paramsSummary")
                     .and_then(|v| v.as_str())
@@ -627,7 +592,10 @@ pub fn format_text_snapshot(result: &Value) -> String {
                 let tag = node.get("tag").and_then(|v| v.as_str()).unwrap_or("?");
                 let role = node.get("role").and_then(|v| v.as_str()).unwrap_or("");
                 let name = node.get("name").and_then(|v| v.as_str()).unwrap_or("");
-                let visible = node.get("visible").and_then(|v| v.as_bool()).unwrap_or(false);
+                let visible = node
+                    .get("visible")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
                 let role_display = if role.is_empty() {
                     tag.to_string()
@@ -663,8 +631,14 @@ pub fn format_text_get_ref(result: &Value) -> String {
     let tag = result.get("tag").and_then(|v| v.as_str()).unwrap_or("?");
     let role = result.get("role").and_then(|v| v.as_str()).unwrap_or("");
     let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    let visible = result.get("visible").and_then(|v| v.as_bool()).unwrap_or(false);
-    let enabled = result.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false);
+    let visible = result
+        .get("visible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let enabled = result
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let mut lines = vec![format!("Ref: {ref_str}")];
     lines.push(format!("Tag: {tag}"));
@@ -747,12 +721,13 @@ pub fn format_text_assert(result: &Value) -> String {
         .get("verified")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let summary = result
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let summary = result.get("summary").and_then(|v| v.as_str()).unwrap_or("");
 
-    let status = if verified { "✓ VERIFIED" } else { "✗ FAILED" };
+    let status = if verified {
+        "✓ VERIFIED"
+    } else {
+        "✗ FAILED"
+    };
     let mut lines = vec![format!("Assert: {status} — {summary}")];
 
     if let Some(checks) = result.get("checks").and_then(|v| v.as_array()) {
@@ -762,26 +737,19 @@ pub fn format_text_assert(result: &Value) -> String {
                 .get("passed")
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false);
-            let expected = check
-                .get("expected")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let actual = check
-                .get("actual")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let expected = check.get("expected").and_then(|v| v.as_str()).unwrap_or("");
+            let actual = check.get("actual").and_then(|v| v.as_str()).unwrap_or("");
             let mark = if passed { "✓" } else { "✗" };
-            let selector = check
-                .get("selector")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
+            let selector = check.get("selector").and_then(|v| v.as_str()).unwrap_or("");
 
             let sel_part = if selector.is_empty() {
                 String::new()
             } else {
                 format!(" [{selector}]")
             };
-            lines.push(format!("  {mark} {kind}: expected={expected}, actual={actual}{sel_part}"));
+            lines.push(format!(
+                "  {mark} {kind}: expected={expected}, actual={actual}{sel_part}"
+            ));
         }
     }
 
@@ -798,34 +766,34 @@ pub fn format_text_diff(result: &Value) -> String {
         .get("changed")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let summary = result
-        .get("summary")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let summary = result.get("summary").and_then(|v| v.as_str()).unwrap_or("");
 
     let status = if changed { "CHANGED" } else { "UNCHANGED" };
     let mut lines = vec![format!("Diff: {status} — {summary}")];
 
     if let Some(changes) = result.get("changes").and_then(|v| v.as_array()) {
         for change in changes {
-            let field = change
-                .get("field")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let before = change.get("before").map(|v| {
-                if let Some(s) = v.as_str() {
-                    s.to_string()
-                } else {
-                    v.to_string()
-                }
-            }).unwrap_or_default();
-            let after = change.get("after").map(|v| {
-                if let Some(s) = v.as_str() {
-                    s.to_string()
-                } else {
-                    v.to_string()
-                }
-            }).unwrap_or_default();
+            let field = change.get("field").and_then(|v| v.as_str()).unwrap_or("?");
+            let before = change
+                .get("before")
+                .map(|v| {
+                    if let Some(s) = v.as_str() {
+                        s.to_string()
+                    } else {
+                        v.to_string()
+                    }
+                })
+                .unwrap_or_default();
+            let after = change
+                .get("after")
+                .map(|v| {
+                    if let Some(s) = v.as_str() {
+                        s.to_string()
+                    } else {
+                        v.to_string()
+                    }
+                })
+                .unwrap_or_default();
             let before_display = if before.len() > 50 {
                 format!("{}…", &before[..49])
             } else {
@@ -860,14 +828,8 @@ pub fn format_text_batch(result: &Value) -> String {
     if let Some(steps) = result.get("steps").and_then(|v| v.as_array()) {
         for step in steps {
             let index = step.get("index").and_then(|v| v.as_u64()).unwrap_or(0);
-            let action = step
-                .get("action")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
-            let status = step
-                .get("status")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let action = step.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+            let status = step.get("status").and_then(|v| v.as_str()).unwrap_or("?");
             let mark = if status == "pass" { "✓" } else { "✗" };
 
             let detail = if status == "fail" {
@@ -965,10 +927,7 @@ pub fn format_text_list_frames(result: &Value) -> String {
                     let name = f.get("name").and_then(|v| v.as_str()).unwrap_or("");
                     let url = f.get("url").and_then(|v| v.as_str()).unwrap_or("");
                     let is_main = f.get("isMain").and_then(|v| v.as_bool()).unwrap_or(false);
-                    let parent = f
-                        .get("parentName")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("");
+                    let parent = f.get("parentName").and_then(|v| v.as_str()).unwrap_or("");
                     let marker = if is_main { " [main]" } else { "" };
                     let name_display = if name.is_empty() {
                         String::new()
@@ -1167,10 +1126,7 @@ pub fn format_text_fill_form(result: &Value) -> String {
 
 /// Format find-best result — show scored candidates for an intent.
 pub fn format_text_find_best(result: &Value) -> String {
-    let intent = result
-        .get("intent")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
+    let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("?");
     let count = result
         .get("candidateCount")
         .and_then(|v| v.as_u64())
@@ -1218,18 +1174,9 @@ pub fn format_text_find_best(result: &Value) -> String {
 
 /// Format act result — show the action performed on the top intent candidate.
 pub fn format_text_act(result: &Value) -> String {
-    let intent = result
-        .get("intent")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let action = result
-        .get("action")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let score = result
-        .get("score")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(0.0);
+    let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("?");
+    let action = result.get("action").and_then(|v| v.as_str()).unwrap_or("?");
+    let score = result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
     let mut lines = vec![format!(
         "Act: {action} for intent '{intent}' (score: {score:.3})"
@@ -1240,14 +1187,8 @@ pub fn format_text_act(result: &Value) -> String {
             .get("selector")
             .and_then(|v| v.as_str())
             .unwrap_or("?");
-        let tag = candidate
-            .get("tag")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let text = candidate
-            .get("text")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let tag = candidate.get("tag").and_then(|v| v.as_str()).unwrap_or("");
+        let text = candidate.get("text").and_then(|v| v.as_str()).unwrap_or("");
         let reason = candidate
             .get("reason")
             .and_then(|v| v.as_str())
@@ -1321,23 +1262,21 @@ pub fn format_text_session_summary(result: &Value) -> String {
     // Console
     if let Some(console) = result.get("console") {
         let total = console.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-        let errors = console
-            .get("errors")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let errors = console.get("errors").and_then(|v| v.as_u64()).unwrap_or(0);
         let error_flag = if errors > 0 { " ⚠" } else { "" };
-        lines.push(format!("Console: {total} entries, {errors} errors{error_flag}"));
+        lines.push(format!(
+            "Console: {total} entries, {errors} errors{error_flag}"
+        ));
     }
 
     // Network
     if let Some(network) = result.get("network") {
         let total = network.get("total").and_then(|v| v.as_u64()).unwrap_or(0);
-        let failed = network
-            .get("failed")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let failed = network.get("failed").and_then(|v| v.as_u64()).unwrap_or(0);
         let fail_flag = if failed > 0 { " ⚠" } else { "" };
-        lines.push(format!("Network: {total} requests, {failed} failed{fail_flag}"));
+        lines.push(format!(
+            "Network: {total} requests, {failed} failed{fail_flag}"
+        ));
     }
 
     // Dialog
@@ -1366,10 +1305,7 @@ pub fn format_text_session_summary(result: &Value) -> String {
 
 /// Format debug-bundle result — show path and files written.
 pub fn format_text_debug_bundle(result: &Value) -> String {
-    let path = result
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
     let file_count = result
         .get("fileCount")
         .and_then(|v| v.as_u64())
@@ -1427,24 +1363,17 @@ pub fn format_text_visual_diff(result: &Value) -> String {
 
 /// Format zoom region result in text mode.
 pub fn format_text_zoom_region(result: &Value) -> String {
-    let width = result
-        .get("width")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let height = result
-        .get("height")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
-    let scale = result
-        .get("scale")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(1.0);
+    let width = result.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
+    let height = result.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    let scale = result.get("scale").and_then(|v| v.as_f64()).unwrap_or(1.0);
     let byte_len = result
         .get("byteLength")
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
 
-    let mut lines = vec![format!("Zoom region captured: {width}x{height} (scale: {scale}x)")];
+    let mut lines = vec![format!(
+        "Zoom region captured: {width}x{height} (scale: {scale}x)"
+    )];
     lines.push(format!("Size: {} bytes", byte_len));
 
     if let Some(region) = result.get("region") {
@@ -1469,14 +1398,8 @@ pub fn format_text_zoom_region(result: &Value) -> String {
 
 /// Format save PDF result in text mode.
 pub fn format_text_save_pdf(result: &Value) -> String {
-    let path = result
-        .get("path")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
-    let format_str = result
-        .get("format")
-        .and_then(|v| v.as_str())
-        .unwrap_or("?");
+    let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
+    let format_str = result.get("format").and_then(|v| v.as_str()).unwrap_or("?");
     let byte_len = result
         .get("byteLength")
         .and_then(|v| v.as_u64())
@@ -1498,15 +1421,15 @@ pub fn format_text_extract(result: &Value) -> String {
         .unwrap_or(false);
 
     if multiple {
-        let count = result
-            .get("count")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
         let mut lines = vec![format!("Extracted {count} items")];
 
         if let Some(data) = result.get("data").and_then(|v| v.as_array()) {
             for (i, item) in data.iter().enumerate().take(10) {
-                lines.push(format!("  [{i}]: {}", serde_json::to_string(item).unwrap_or_default()));
+                lines.push(format!(
+                    "  [{i}]: {}",
+                    serde_json::to_string(item).unwrap_or_default()
+                ));
             }
             if data.len() > 10 {
                 lines.push(format!("  ... and {} more", data.len() - 10));
@@ -1543,26 +1466,17 @@ pub fn format_text_extract(result: &Value) -> String {
 }
 
 pub fn format_text_mock_route(result: &Value) -> String {
-    let route_id = result
-        .get("route_id")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let route_id = result.get("route_id").and_then(|v| v.as_u64()).unwrap_or(0);
     let pattern = result
         .get("pattern")
         .and_then(|v| v.as_str())
         .unwrap_or("?");
-    let status = result
-        .get("status")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(200);
+    let status = result.get("status").and_then(|v| v.as_u64()).unwrap_or(200);
     format!("Mock route #{route_id} added: {pattern} → {status}")
 }
 
 pub fn format_text_block_urls(result: &Value) -> String {
-    let count = result
-        .get("blocked")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let count = result.get("blocked").and_then(|v| v.as_u64()).unwrap_or(0);
     let patterns = result
         .get("patterns")
         .and_then(|v| v.as_array())
@@ -1577,10 +1491,7 @@ pub fn format_text_block_urls(result: &Value) -> String {
 }
 
 pub fn format_text_clear_routes(result: &Value) -> String {
-    let cleared = result
-        .get("cleared")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let cleared = result.get("cleared").and_then(|v| v.as_u64()).unwrap_or(0);
     format!("Cleared {cleared} route(s)")
 }
 
@@ -1592,7 +1503,10 @@ pub fn format_text_emulate_device(result: &Value) -> String {
             let name = d.get("name").and_then(|v| v.as_str()).unwrap_or("?");
             let w = d.get("width").and_then(|v| v.as_u64()).unwrap_or(0);
             let h = d.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-            let scale = d.get("deviceScaleFactor").and_then(|v| v.as_f64()).unwrap_or(1.0);
+            let scale = d
+                .get("deviceScaleFactor")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(1.0);
             let mobile = d.get("mobile").and_then(|v| v.as_bool()).unwrap_or(false);
             lines.push(format!(
                 "  {name}: {w}x{h} @{scale}x{}",
@@ -1623,8 +1537,14 @@ pub fn format_text_save_state(result: &Value) -> String {
     let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("?");
     let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
     let cookies = result.get("cookies").and_then(|v| v.as_u64()).unwrap_or(0);
-    let ls = result.get("localStorage").and_then(|v| v.as_u64()).unwrap_or(0);
-    let ss = result.get("sessionStorage").and_then(|v| v.as_u64()).unwrap_or(0);
+    let ls = result
+        .get("localStorage")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let ss = result
+        .get("sessionStorage")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
     format!(
         "State '{name}' saved → {path}\n  {cookies} cookies, {ls} localStorage, {ss} sessionStorage"
     )
@@ -1633,24 +1553,40 @@ pub fn format_text_save_state(result: &Value) -> String {
 pub fn format_text_restore_state(result: &Value) -> String {
     let name = result.get("name").and_then(|v| v.as_str()).unwrap_or("?");
     let cookies = result.get("cookies").and_then(|v| v.as_u64()).unwrap_or(0);
-    let ls = result.get("localStorage").and_then(|v| v.as_u64()).unwrap_or(0);
-    let ss = result.get("sessionStorage").and_then(|v| v.as_u64()).unwrap_or(0);
-    format!(
-        "State '{name}' restored: {cookies} cookies, {ls} localStorage, {ss} sessionStorage"
-    )
+    let ls = result
+        .get("localStorage")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let ss = result
+        .get("sessionStorage")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    format!("State '{name}' restored: {cookies} cookies, {ls} localStorage, {ss} sessionStorage")
 }
 
 pub fn format_text_vault_save(result: &Value) -> String {
-    let profile = result.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
+    let profile = result
+        .get("profile")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-    let username = result.get("username").and_then(|v| v.as_str()).unwrap_or("?");
+    let username = result
+        .get("username")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     format!("Vault profile '{profile}' saved (user: {username}, url: {url})")
 }
 
 pub fn format_text_vault_login(result: &Value) -> String {
-    let profile = result.get("profile").and_then(|v| v.as_str()).unwrap_or("?");
+    let profile = result
+        .get("profile")
+        .and_then(|v| v.as_str())
+        .unwrap_or("?");
     let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("?");
-    let logged_in = result.get("logged_in").and_then(|v| v.as_bool()).unwrap_or(false);
+    let logged_in = result
+        .get("logged_in")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if logged_in {
         format!("Logged in with vault profile '{profile}' at {url}")
     } else {
@@ -1683,7 +1619,10 @@ pub fn format_text_action_cache(result: &Value) -> String {
         if result.get("hits").is_some() {
             let hits = result.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
             let misses = result.get("misses").and_then(|v| v.as_u64()).unwrap_or(0);
-            let hit_rate = result.get("hitRate").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let hit_rate = result
+                .get("hitRate")
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
             return format!(
                 "Action cache: {entries} entries, {hits} hits, {misses} misses ({:.0}% hit rate)",
                 hit_rate * 100.0
@@ -1693,7 +1632,10 @@ pub fn format_text_action_cache(result: &Value) -> String {
     // Get response
     if let Some(found) = result.get("found").and_then(|v| v.as_bool()) {
         if found {
-            let selector = result.get("selector").and_then(|v| v.as_str()).unwrap_or("?");
+            let selector = result
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .unwrap_or("?");
             let score = result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
             return format!("Cache hit: {selector} (score: {score:.2})");
         } else {
@@ -1701,20 +1643,33 @@ pub fn format_text_action_cache(result: &Value) -> String {
         }
     }
     // Put response
-    if result.get("stored").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if result
+        .get("stored")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false)
+    {
         let intent = result.get("intent").and_then(|v| v.as_str()).unwrap_or("?");
-        let selector = result.get("selector").and_then(|v| v.as_str()).unwrap_or("?");
+        let selector = result
+            .get("selector")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
         return format!("Cached: {intent} → {selector}");
     }
     // Clear response
     if let Some(cleared) = result.get("cleared").and_then(|v| v.as_u64()) {
         return format!("Action cache cleared ({cleared} entries removed)");
     }
-    format!("{}", serde_json::to_string_pretty(result).unwrap_or_default())
+    format!(
+        "{}",
+        serde_json::to_string_pretty(result).unwrap_or_default()
+    )
 }
 
 pub fn format_text_check_injection(result: &Value) -> String {
-    let clean = result.get("clean").and_then(|v| v.as_bool()).unwrap_or(true);
+    let clean = result
+        .get("clean")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
     let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
 
     if clean {
@@ -1765,12 +1720,13 @@ pub fn format_text_trace_start(result: &Value) -> String {
 pub fn format_text_trace_stop(result: &Value) -> String {
     let path = result.get("path").and_then(|v| v.as_str()).unwrap_or("?");
     let events = result.get("events").and_then(|v| v.as_u64()).unwrap_or(0);
-    let duration = result.get("duration").and_then(|v| v.as_f64()).unwrap_or(0.0);
+    let duration = result
+        .get("duration")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
     let size = result.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
     let size_kb = size as f64 / 1024.0;
-    format!(
-        "Trace stopped: {path}\n  {events} events, {duration:.1}s, {size_kb:.1} KB"
-    )
+    format!("Trace stopped: {path}\n  {events} events, {duration:.1}s, {size_kb:.1} KB")
 }
 
 #[cfg(test)]

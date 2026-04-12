@@ -105,7 +105,10 @@ fn find_device(query: &str) -> Option<&'static DevicePreset> {
     let lower = query.to_lowercase();
 
     // Try exact match first
-    if let Some(preset) = DEVICE_PRESETS.iter().find(|d| d.name.to_lowercase() == lower) {
+    if let Some(preset) = DEVICE_PRESETS
+        .iter()
+        .find(|d| d.name.to_lowercase() == lower)
+    {
         return Some(preset);
     }
 
