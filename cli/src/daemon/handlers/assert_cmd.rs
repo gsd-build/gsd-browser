@@ -208,6 +208,16 @@ pub async fn handle_assert(
                 };
                 (pass, format!("text '{text}' visible"), snippet)
             }
+            "text_hidden" => {
+                let body = &page_state.body_text;
+                let pass = !body.contains(text);
+                let snippet = if body.len() > 100 {
+                    format!("{}…", &body[..100])
+                } else {
+                    body.clone()
+                };
+                (pass, format!("text '{text}' hidden"), snippet)
+            }
             "selector_visible" => {
                 let sel_state = &selector_states[selector];
                 let pass = sel_state

@@ -454,7 +454,7 @@ async fn dispatch_inner(
                 "pid": process::id(),
             }),
         ),
-        "navigate" => match handlers::navigate::handle_navigate(page, &req.params).await {
+        "navigate" => match handlers::navigate::handle_navigate(page, &req.params, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -463,15 +463,15 @@ async fn dispatch_inner(
                 json!({"retryHint": "Check URL is valid and reachable"}),
             ),
         },
-        "back" => match handlers::navigate::handle_back(page).await {
+        "back" => match handlers::navigate::handle_back(page, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "forward" => match handlers::navigate::handle_forward(page).await {
+        "forward" => match handlers::navigate::handle_forward(page, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "reload" => match handlers::navigate::handle_reload(page).await {
+        "reload" => match handlers::navigate::handle_reload(page, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -739,7 +739,7 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "vault_login" => match handlers::auth_vault::handle_vault_login(page, &req.params).await {
+        "vault_login" => match handlers::auth_vault::handle_vault_login(page, &req.params, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },

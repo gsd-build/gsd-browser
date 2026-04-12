@@ -158,7 +158,11 @@ pub async fn handle_vault_save(_page: &Page, params: &Value) -> Result<Value, St
     }))
 }
 
-pub async fn handle_vault_login(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_vault_login(
+    page: &Page,
+    params: &Value,
+    state: &super::super::state::DaemonState,
+) -> Result<Value, String> {
     let passphrase = get_vault_key()?;
 
     let profile = params
@@ -182,7 +186,7 @@ pub async fn handle_vault_login(page: &Page, params: &Value) -> Result<Value, St
 
     // 1. Navigate to the URL
     let nav_params = json!({"url": entry.url});
-    super::navigate::handle_navigate(page, &nav_params).await?;
+    super::navigate::handle_navigate(page, &nav_params, state).await?;
 
     // 2. Fill form with credentials
     // If extra_fields has field_mappings, use those to map form fields to credentials.

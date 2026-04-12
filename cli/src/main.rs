@@ -279,9 +279,16 @@ enum Commands {
         #[arg(long)]
         slowly: bool,
     },
-    /// Run one or more assertions against current page state
+    /// Run one or more assertions against current page state.
+    ///
+    /// Valid assertion kinds: url_contains, text_visible, text_hidden,
+    /// selector_visible, selector_hidden, value_equals, checked,
+    /// no_console_errors, no_failed_requests, request_url_seen,
+    /// response_status, console_message_matches, network_count,
+    /// console_count, element_count, no_console_errors_since,
+    /// no_failed_requests_since
     Assert {
-        /// JSON array of assertion checks
+        /// JSON array of assertion checks, e.g. '[{"kind":"url_contains","text":"example"}]'
         #[arg(long)]
         checks: String,
     },

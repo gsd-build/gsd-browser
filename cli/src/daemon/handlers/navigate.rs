@@ -1,10 +1,12 @@
 //! Navigation command handlers: navigate, back, forward, reload.
 //!
-//! Each handler receives a shared `Page` reference, performs the CDP action,
-//! settles the DOM, captures compact state, and returns a JSON result.
+//! Each handler receives a shared `Page` reference and `DaemonState`, performs
+//! the CDP action, settles the DOM, captures compact state, updates the
+//! PageRegistry metadata, and returns a JSON result.
 
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
+use crate::daemon::state::DaemonState;
 use chromiumoxide::cdp::browser_protocol::page::{
     GetNavigationHistoryParams, NavigateToHistoryEntryParams,
 };
@@ -15,8 +17,19 @@ use std::time::Duration;
 use tokio::time::timeout;
 use tracing::debug;
 
+/// Update the PageRegistry metadata for the active page after navigation.
+fn sync_page_registry(state: &DaemonState, title: &str, url: &str) {
+    let mut pages = state.pages.lock().unwrap();
+    let active_id = pages.active_page_id;
+    pages.update_metadata(active_id, title.to_string(), url.to_string());
+}
+
 /// Navigate to a URL. Expects params: `{ "url": "..." }`.
-pub async fn handle_navigate(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_navigate(
+    page: &Page,
+    params: &Value,
+    state: &DaemonState,
+) -> Result<Value, String> {
     let url = params
         .get("url")
         .and_then(|v| v.as_str())
@@ -42,19 +55,20 @@ pub async fn handle_navigate(page: &Page, params: &Value) -> Result<Value, Strin
     };
     let settle = settle_after_action(page, &settle_opts).await;
 
-    // Capture page state
-    let state = capture_compact_page_state(page, true).await;
+    // Capture page state and sync registry
+    let page_state = capture_compact_page_state(page, true).await;
+    sync_page_registry(state, &page_state.title, &page_state.url);
 
     Ok(json!({
-        "url": state.url,
-        "title": state.title,
+        "url": page_state.url,
+        "title": page_state.title,
         "settle": settle,
-        "state": state,
+        "state": page_state,
     }))
 }
 
 /// Go back in browser history.
-pub async fn handle_back(page: &Page) -> Result<Value, String> {
+pub async fn handle_back(page: &Page, state: &DaemonState) -> Result<Value, String> {
     debug!("back: navigating to previous page");
 
     // Get navigation history to check if back is possible
@@ -89,18 +103,19 @@ pub async fn handle_back(page: &Page) -> Result<Value, String> {
         ..SettleOptions::default()
     };
     let settle = settle_after_action(page, &settle_opts).await;
-    let state = capture_compact_page_state(page, true).await;
+    let page_state = capture_compact_page_state(page, true).await;
+    sync_page_registry(state, &page_state.title, &page_state.url);
 
     Ok(json!({
-        "url": state.url,
-        "title": state.title,
+        "url": page_state.url,
+        "title": page_state.title,
         "settle": settle,
-        "state": state,
+        "state": page_state,
     }))
 }
 
 /// Go forward in browser history.
-pub async fn handle_forward(page: &Page) -> Result<Value, String> {
+pub async fn handle_forward(page: &Page, state: &DaemonState) -> Result<Value, String> {
     debug!("forward: navigating to next page");
 
     let history = timeout(
@@ -133,18 +148,19 @@ pub async fn handle_forward(page: &Page) -> Result<Value, String> {
         ..SettleOptions::default()
     };
     let settle = settle_after_action(page, &settle_opts).await;
-    let state = capture_compact_page_state(page, true).await;
+    let page_state = capture_compact_page_state(page, true).await;
+    sync_page_registry(state, &page_state.title, &page_state.url);
 
     Ok(json!({
-        "url": state.url,
-        "title": state.title,
+        "url": page_state.url,
+        "title": page_state.title,
         "settle": settle,
-        "state": state,
+        "state": page_state,
     }))
 }
 
 /// Reload the current page.
-pub async fn handle_reload(page: &Page) -> Result<Value, String> {
+pub async fn handle_reload(page: &Page, state: &DaemonState) -> Result<Value, String> {
     debug!("reload: refreshing current page");
 
     // page.reload() handles the CDP reload + wait_for_navigation
@@ -161,12 +177,13 @@ pub async fn handle_reload(page: &Page) -> Result<Value, String> {
         ..SettleOptions::default()
     };
     let settle = settle_after_action(page, &settle_opts).await;
-    let state = capture_compact_page_state(page, true).await;
+    let page_state = capture_compact_page_state(page, true).await;
+    sync_page_registry(state, &page_state.title, &page_state.url);
 
     Ok(json!({
-        "url": state.url,
-        "title": state.title,
+        "url": page_state.url,
+        "title": page_state.title,
         "settle": settle,
-        "state": state,
+        "state": page_state,
     }))
 }
