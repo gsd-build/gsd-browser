@@ -1,13 +1,13 @@
 //! CDP Tracing domain — start/stop performance traces.
 
 use crate::daemon::state::DaemonState;
-use gsd_browser_common::state_dir;
 use chromiumoxide::cdp::browser_protocol::tracing::{
     EndParams as TracingEndParams, EventDataCollected, EventTracingComplete,
     StartParams as TracingStartParams,
 };
 use chromiumoxide::Page;
 use futures::StreamExt;
+use gsd_browser_common::state_dir;
 use serde_json::{json, Value};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -159,8 +159,7 @@ pub async fn handle_trace_stop(
     let json_str = serde_json::to_string(&trace_json)
         .map_err(|e| format!("failed to serialize trace: {e}"))?;
 
-    fs::write(&path, &json_str)
-        .map_err(|e| format!("failed to write trace file: {e}"))?;
+    fs::write(&path, &json_str).map_err(|e| format!("failed to write trace file: {e}"))?;
 
     Ok(json!({
         "path": path,

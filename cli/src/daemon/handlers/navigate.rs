@@ -5,11 +5,11 @@
 
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
-use gsd_browser_common::types::SettleOptions;
 use chromiumoxide::cdp::browser_protocol::page::{
     GetNavigationHistoryParams, NavigateToHistoryEntryParams,
 };
 use chromiumoxide::Page;
+use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::timeout;

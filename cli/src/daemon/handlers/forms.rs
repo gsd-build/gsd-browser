@@ -6,11 +6,13 @@
 //! `fill_form` — resolves form field identifiers to selectors, dispatches
 //! fill/select/check via existing interaction handlers, optionally submits.
 
-use super::interaction::{handle_click, handle_select_option, handle_set_checked, handle_type_text};
+use super::interaction::{
+    handle_click, handle_select_option, handle_set_checked, handle_type_text,
+};
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
-use gsd_browser_common::types::SettleOptions;
 use chromiumoxide::Page;
+use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -364,7 +366,12 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
     let result = timeout(JS_TIMEOUT, page.evaluate_expression(&resolve_js))
         .await
         .map_err(|_| "fill_form: timed out resolving field selectors".to_string())?
-        .map_err(|e| format!("fill_form: field resolution failed: {}", super::clean_cdp_error(&e)))?;
+        .map_err(|e| {
+            format!(
+                "fill_form: field resolution failed: {}",
+                super::clean_cdp_error(&e)
+            )
+        })?;
 
     let resolve_data = result.value().cloned().unwrap_or(json!({}));
     let resolved = resolve_data
@@ -395,18 +402,9 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
     let mut fill_errors = Vec::new();
 
     for field in &resolved {
-        let key = field
-            .get("key")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let selector = field
-            .get("selector")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let field_type = field
-            .get("type")
-            .and_then(|v| v.as_str())
-            .unwrap_or("text");
+        let key = field.get("key").and_then(|v| v.as_str()).unwrap_or("");
+        let selector = field.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+        let field_type = field.get("type").and_then(|v| v.as_str()).unwrap_or("text");
 
         let value = match values_map.get(key) {
             Some(v) => v,

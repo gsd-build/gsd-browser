@@ -192,7 +192,12 @@ const EVALUATE_HELPERS_SOURCE: &str = r##"(function() {
 /// This is non-fatal — if injection fails, we log a warning and continue.
 /// The helpers are used by S03+ snapshot-ref features, not by core navigation.
 pub async fn inject_helpers(page: &Page) {
-    match timeout(INJECT_TIMEOUT, page.evaluate_on_new_document(EVALUATE_HELPERS_SOURCE)).await {
+    match timeout(
+        INJECT_TIMEOUT,
+        page.evaluate_on_new_document(EVALUATE_HELPERS_SOURCE),
+    )
+    .await
+    {
         Ok(Ok(id)) => {
             debug!("evaluate-helpers injected (script id: {id:?})");
         }

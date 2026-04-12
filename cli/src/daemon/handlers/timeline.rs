@@ -11,7 +11,10 @@ pub fn handle_timeline(state: &DaemonState, params: &Value) -> Result<Value, Str
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let timeline = state.timeline.lock().map_err(|e| format!("lock error: {e}"))?;
+    let timeline = state
+        .timeline
+        .lock()
+        .map_err(|e| format!("lock error: {e}"))?;
     let entries = timeline.snapshot();
 
     debug!("timeline: returning {} entries", entries.len());

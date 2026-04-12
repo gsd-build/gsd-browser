@@ -4,7 +4,6 @@
 //! background tokio tasks that consume CDP event streams and push entries
 //! into shared buffers.
 
-use gsd_browser_common::types::{ConsoleLogEntry, DialogLogEntry, NetworkLogEntry};
 use chromiumoxide::cdp::browser_protocol::network::{EventLoadingFailed, EventResponseReceived};
 use chromiumoxide::cdp::browser_protocol::page::{
     EventJavascriptDialogOpening, HandleJavaScriptDialogParams,
@@ -12,6 +11,7 @@ use chromiumoxide::cdp::browser_protocol::page::{
 use chromiumoxide::cdp::js_protocol::runtime::{EventConsoleApiCalled, EventExceptionThrown};
 use chromiumoxide::Page;
 use futures::StreamExt;
+use gsd_browser_common::types::{ConsoleLogEntry, DialogLogEntry, NetworkLogEntry};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 use tracing::{debug, warn};

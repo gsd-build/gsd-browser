@@ -172,23 +172,15 @@ pub async fn handle_assert(
     let mut all_passed = true;
 
     for check in checks {
-        let kind = check
-            .get("kind")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let kind = check.get("kind").and_then(|v| v.as_str()).unwrap_or("");
         let text = check.get("text").and_then(|v| v.as_str()).unwrap_or("");
-        let selector = check
-            .get("selector")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let selector = check.get("selector").and_then(|v| v.as_str()).unwrap_or("");
         let value = check.get("value").and_then(|v| v.as_str()).unwrap_or("");
         let threshold_str = check
             .get("threshold")
             .and_then(|v| v.as_str())
             .unwrap_or("");
-        let since_action_id = check
-            .get("sinceActionId")
-            .and_then(|v| v.as_u64());
+        let since_action_id = check.get("sinceActionId").and_then(|v| v.as_u64());
         let checked_expected = check
             .get("checked")
             .and_then(|v| v.as_bool())
@@ -222,12 +214,24 @@ pub async fn handle_assert(
                     .get("visible")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let actual_str = if sel_state.get("exists").and_then(|v| v.as_bool()).unwrap_or(false) {
-                    if pass { "visible" } else { "hidden" }
+                let actual_str = if sel_state
+                    .get("exists")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    if pass {
+                        "visible"
+                    } else {
+                        "hidden"
+                    }
                 } else {
                     "not found"
                 };
-                (pass, format!("'{selector}' visible"), actual_str.to_string())
+                (
+                    pass,
+                    format!("'{selector}' visible"),
+                    actual_str.to_string(),
+                )
             }
             "selector_hidden" => {
                 let sel_state = &selector_states[selector];
@@ -257,11 +261,7 @@ pub async fn handle_assert(
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let pass = actual_val == value;
-                (
-                    pass,
-                    format!("value == '{value}'"),
-                    actual_val.to_string(),
-                )
+                (pass, format!("value == '{value}'"), actual_val.to_string())
             }
             "checked" => {
                 let sel_state = &selector_states[selector];
@@ -305,7 +305,11 @@ pub async fn handle_assert(
                 (
                     seen,
                     format!("request URL contains '{text}'"),
-                    if seen { "found".into() } else { "not found".into() },
+                    if seen {
+                        "found".into()
+                    } else {
+                        "not found".into()
+                    },
                 )
             }
             "response_status" => {
@@ -314,11 +318,12 @@ pub async fn handle_assert(
                     .iter()
                     .find(|e| e.url.contains(text) && e.status == expected_status);
                 let pass = matching.is_some();
-                let actual_str = if let Some(entry) = network_entries.iter().find(|e| e.url.contains(text)) {
-                    format!("{}", entry.status)
-                } else {
-                    "no matching request".into()
-                };
+                let actual_str =
+                    if let Some(entry) = network_entries.iter().find(|e| e.url.contains(text)) {
+                        format!("{}", entry.status)
+                    } else {
+                        "no matching request".into()
+                    };
                 (
                     pass,
                     format!("response status {expected_status} for '{text}'"),
@@ -330,7 +335,11 @@ pub async fn handle_assert(
                 (
                     found,
                     format!("console message contains '{text}'"),
-                    if found { "found".into() } else { "not found".into() },
+                    if found {
+                        "found".into()
+                    } else {
+                        "not found".into()
+                    },
                 )
             }
             "network_count" => {
@@ -425,7 +434,10 @@ pub async fn handle_assert(
                 let pass = errors.is_empty();
                 (
                     pass,
-                    format!("no console errors since action {}", since_action_id.unwrap_or(0)),
+                    format!(
+                        "no console errors since action {}",
+                        since_action_id.unwrap_or(0)
+                    ),
                     format!("{} errors", errors.len()),
                 )
             }
@@ -440,7 +452,10 @@ pub async fn handle_assert(
                 let pass = failed.is_empty();
                 (
                     pass,
-                    format!("no failed requests since action {}", since_action_id.unwrap_or(0)),
+                    format!(
+                        "no failed requests since action {}",
+                        since_action_id.unwrap_or(0)
+                    ),
                     format!("{} failures", failed.len()),
                 )
             }
@@ -465,7 +480,10 @@ pub async fn handle_assert(
         results.push(check_result);
     }
 
-    let passed_count = results.iter().filter(|r| r["passed"].as_bool().unwrap_or(false)).count();
+    let passed_count = results
+        .iter()
+        .filter(|r| r["passed"].as_bool().unwrap_or(false))
+        .count();
     let total = results.len();
     let summary = format!("{passed_count}/{total} checks passed");
 
@@ -509,7 +527,10 @@ pub async fn handle_diff(
             diff_state.before.clone()
         } else {
             // Default: compare against the most recent after-state
-            diff_state.after.clone().or_else(|| diff_state.before.clone())
+            diff_state
+                .after
+                .clone()
+                .or_else(|| diff_state.before.clone())
         }
     };
 
@@ -552,7 +573,9 @@ pub async fn handle_diff(
             "after": current.focus,
         }));
     }
-    if current.dialog.count != previous.dialog.count || current.dialog.title != previous.dialog.title {
+    if current.dialog.count != previous.dialog.count
+        || current.dialog.title != previous.dialog.title
+    {
         changes.push(json!({
             "field": "dialog",
             "before": format!("count={}, title=\"{}\"", previous.dialog.count, previous.dialog.title),
@@ -569,7 +592,11 @@ pub async fn handle_diff(
 
     // Element count changes
     let count_fields = [
-        ("landmarks", current.counts.landmarks, previous.counts.landmarks),
+        (
+            "landmarks",
+            current.counts.landmarks,
+            previous.counts.landmarks,
+        ),
         ("buttons", current.counts.buttons, previous.counts.buttons),
         ("links", current.counts.links, previous.counts.links),
         ("inputs", current.counts.inputs, previous.counts.inputs),
@@ -597,10 +624,7 @@ pub async fn handle_diff(
 
     let changed = !changes.is_empty();
     let summary = if changed {
-        let fields: Vec<&str> = changes
-            .iter()
-            .filter_map(|c| c["field"].as_str())
-            .collect();
+        let fields: Vec<&str> = changes.iter().filter_map(|c| c["field"].as_str()).collect();
         format!("{} fields changed: {}", fields.len(), fields.join(", "))
     } else {
         "No changes detected.".into()

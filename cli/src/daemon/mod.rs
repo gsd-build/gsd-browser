@@ -155,7 +155,8 @@ async fn run_daemon(
 
     let mut builder = BrowserConfig::builder()
         .chrome_executable(chrome_path)
-        .window_size(1920, 1080);
+        .window_size(1920, 1080)
+        .arg("--window-size=1920,1080");
     if !config.browser.headless {
         builder = builder.with_head();
     }

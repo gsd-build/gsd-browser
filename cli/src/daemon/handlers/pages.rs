@@ -67,12 +67,7 @@ pub async fn handle_switch_page(
     crate::daemon::settle::ensure_mutation_counter(&new_page).await;
 
     // Read current title/url from the page
-    let url = new_page
-        .url()
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    let url = new_page.url().await.ok().flatten().unwrap_or_default();
     let title = new_page
         .evaluate("document.title")
         .await
@@ -101,10 +96,7 @@ pub async fn handle_switch_page(
 
 /// Close a page by ID. Cannot close the last remaining page.
 /// Falls back active to another page if the closed page was active.
-pub async fn handle_close_page(
-    state: &DaemonState,
-    params: &Value,
-) -> Result<Value, String> {
+pub async fn handle_close_page(state: &DaemonState, params: &Value) -> Result<Value, String> {
     let id = params
         .get("id")
         .and_then(|v| v.as_u64())
@@ -198,10 +190,7 @@ pub async fn handle_list_frames(page: &Page) -> Result<Value, String> {
 
 /// Select a frame for subsequent JS evaluations.
 /// Pass name="main" or null to reset to the main frame.
-pub fn handle_select_frame(
-    state: &DaemonState,
-    params: &Value,
-) -> Result<Value, String> {
+pub fn handle_select_frame(state: &DaemonState, params: &Value) -> Result<Value, String> {
     let name = params.get("name").and_then(|v| v.as_str());
     let index = params.get("index").and_then(|v| v.as_u64());
     let url_pattern = params.get("urlPattern").and_then(|v| v.as_str());

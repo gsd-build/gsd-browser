@@ -122,7 +122,10 @@ pub async fn handle_eval(page: &Page, params: &Value) -> Result<Value, String> {
         return Err("expression cannot be empty".to_string());
     }
 
-    debug!("handle_eval: expression={}", &expression[..expression.len().min(100)]);
+    debug!(
+        "handle_eval: expression={}",
+        &expression[..expression.len().min(100)]
+    );
 
     let result = timeout(
         Duration::from_secs(30),
@@ -161,7 +164,10 @@ const PAGE_SOURCE_MAX_BYTES: usize = 200 * 1024;
 /// - `max_depth` (u32, default 10): max tree depth.
 /// - `max_count` (u32, default 100): max elements to include.
 pub async fn handle_accessibility_tree(page: &Page, params: &Value) -> Result<Value, String> {
-    let selector = params.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+    let selector = params
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let max_depth = params
         .get("max_depth")
         .and_then(|v| v.as_u64())
@@ -235,7 +241,10 @@ pub async fn handle_accessibility_tree(page: &Page, params: &Value) -> Result<Va
         root_expr = if selector.is_empty() {
             "document.body".to_string()
         } else {
-            format!("document.querySelector('{}')", selector.replace('\'', "\\'"))
+            format!(
+                "document.querySelector('{}')",
+                selector.replace('\'', "\\'")
+            )
         },
         max_depth = max_depth,
         max_count = max_count,
@@ -264,11 +273,11 @@ pub async fn handle_accessibility_tree(page: &Page, params: &Value) -> Result<Va
 pub async fn handle_find(page: &Page, params: &Value) -> Result<Value, String> {
     let role = params.get("role").and_then(|v| v.as_str()).unwrap_or("");
     let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
-    let selector = params.get("selector").and_then(|v| v.as_str()).unwrap_or("");
-    let limit = params
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(20) as u32;
+    let selector = params
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
 
     if role.is_empty() && text.is_empty() && selector.is_empty() {
         return Err("at least one of role, text, or selector is required".to_string());
@@ -356,7 +365,10 @@ pub async fn handle_find(page: &Page, params: &Value) -> Result<Value, String> {
 /// Params:
 /// - `selector` (string, optional): CSS selector to scope the source.
 pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, String> {
-    let selector = params.get("selector").and_then(|v| v.as_str()).unwrap_or("");
+    let selector = params
+        .get("selector")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     debug!("handle_page_source: selector={:?}", selector);
 

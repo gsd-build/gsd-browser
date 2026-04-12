@@ -75,8 +75,7 @@ pub async fn handle_visual_diff(page: &Page, params: &Value) -> Result<Value, St
         .to_rgba8();
 
     let dir = baselines_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| format!("failed to create baselines dir: {e}"))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("failed to create baselines dir: {e}"))?;
 
     let sanitized_name = name.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_");
     let baseline_path = dir.join(format!("{sanitized_name}.png"));
@@ -103,8 +102,8 @@ pub async fn handle_visual_diff(page: &Page, params: &Value) -> Result<Value, St
     }
 
     // Load existing baseline
-    let baseline_bytes = std::fs::read(&baseline_path)
-        .map_err(|e| format!("failed to read baseline: {e}"))?;
+    let baseline_bytes =
+        std::fs::read(&baseline_path).map_err(|e| format!("failed to read baseline: {e}"))?;
 
     let baseline_img = ImageReader::new(Cursor::new(&baseline_bytes))
         .with_guessed_format()
@@ -211,10 +210,7 @@ pub async fn handle_zoom_region(page: &Page, params: &Value) -> Result<Value, St
         .get("height")
         .and_then(|v| v.as_f64())
         .ok_or("missing required param 'height'")?;
-    let scale = params
-        .get("scale")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(2.0);
+    let scale = params.get("scale").and_then(|v| v.as_f64()).unwrap_or(2.0);
 
     debug!("[zoom_region] x={x}, y={y}, w={width}, h={height}, scale={scale}");
 

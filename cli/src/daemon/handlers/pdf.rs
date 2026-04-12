@@ -95,7 +95,13 @@ pub async fn handle_save_pdf(page: &Page, params: &Value) -> Result<Value, Strin
                 .unwrap_or_else(|| "page".to_string());
             let sanitized = title
                 .chars()
-                .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+                .map(|c| {
+                    if c.is_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
                 .take(50)
                 .collect::<String>();
             let ts = chrono::Utc::now().format("%Y%m%d-%H%M%S");
@@ -107,8 +113,7 @@ pub async fn handle_save_pdf(page: &Page, params: &Value) -> Result<Value, Strin
 
     // Ensure parent dir exists for custom paths
     if let Some(parent) = out_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("failed to create output dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("failed to create output dir: {e}"))?;
     }
 
     let byte_len = pdf_bytes.len();

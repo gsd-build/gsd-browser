@@ -6,11 +6,11 @@
 
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
-use gsd_browser_common::types::SettleOptions;
 use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::layout::Point;
 use chromiumoxide::Page;
+use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -136,7 +136,10 @@ pub async fn handle_type_text(page: &Page, params: &Value) -> Result<Value, Stri
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    debug!("type_text: selector={selector} len={} slowly={slowly} clear={clear_first} submit={submit}", text.len());
+    debug!(
+        "type_text: selector={selector} len={} slowly={slowly} clear={clear_first} submit={submit}",
+        text.len()
+    );
 
     let text_len = text.len();
 
@@ -352,15 +355,16 @@ pub async fn handle_scroll(page: &Page, params: &Value) -> Result<Value, String>
         .get("direction")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing required parameter: direction".to_string())?;
-    let amount = params
-        .get("amount")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(300) as i32;
+    let amount = params.get("amount").and_then(|v| v.as_i64()).unwrap_or(300) as i32;
 
     let scroll_amount = match direction {
         "up" => -amount.abs(),
         "down" => amount.abs(),
-        _ => return Err(format!("direction must be 'up' or 'down', got: {direction}")),
+        _ => {
+            return Err(format!(
+                "direction must be 'up' or 'down', got: {direction}"
+            ))
+        }
     };
 
     debug!("scroll: direction={direction} amount={scroll_amount}");
@@ -540,10 +544,22 @@ pub async fn handle_drag(page: &Page, params: &Value) -> Result<Value, String> {
         .map_err(|e| format!("drag: failed to get element centers: {e}"))?;
 
     let centers = result.value().cloned().unwrap_or(json!({}));
-    let sx = centers.get("sx").and_then(|v| v.as_f64()).ok_or("drag: could not get source x")?;
-    let sy = centers.get("sy").and_then(|v| v.as_f64()).ok_or("drag: could not get source y")?;
-    let tx = centers.get("tx").and_then(|v| v.as_f64()).ok_or("drag: could not get target x")?;
-    let ty = centers.get("ty").and_then(|v| v.as_f64()).ok_or("drag: could not get target y")?;
+    let sx = centers
+        .get("sx")
+        .and_then(|v| v.as_f64())
+        .ok_or("drag: could not get source x")?;
+    let sy = centers
+        .get("sy")
+        .and_then(|v| v.as_f64())
+        .ok_or("drag: could not get source y")?;
+    let tx = centers
+        .get("tx")
+        .and_then(|v| v.as_f64())
+        .ok_or("drag: could not get target x")?;
+    let ty = centers
+        .get("ty")
+        .and_then(|v| v.as_f64())
+        .ok_or("drag: could not get target y")?;
 
     // Simulate drag via mouse events: move to source, press, move to target, release
     timeout(CDP_TIMEOUT, page.move_mouse(Point::new(sx, sy)))
@@ -593,14 +609,19 @@ pub async fn handle_set_viewport(page: &Page, params: &Value) -> Result<Value, S
         Some("tablet") => (768, 1024, Some("tablet")),
         Some("desktop") => (1280, 720, Some("desktop")),
         Some("wide") => (1920, 1080, Some("wide")),
-        Some(unknown) => return Err(format!(
-            "unknown preset: {unknown}. Valid presets: mobile, tablet, desktop, wide"
-        )),
+        Some(unknown) => {
+            return Err(format!(
+                "unknown preset: {unknown}. Valid presets: mobile, tablet, desktop, wide"
+            ))
+        }
         None => match (custom_width, custom_height) {
             (Some(w), Some(h)) => (w, h, None),
-            _ => return Err(
-                "set_viewport requires either 'preset' or both 'width' and 'height'".to_string(),
-            ),
+            _ => {
+                return Err(
+                    "set_viewport requires either 'preset' or both 'width' and 'height'"
+                        .to_string(),
+                )
+            }
         },
     };
 

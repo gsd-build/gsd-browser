@@ -45,8 +45,8 @@ pub fn handle_generate_test(state: &DaemonState, params: &Value) -> Result<Value
         match tool {
             "navigate" => {
                 // Extract URL from params or after_url
-                let url = extract_param_str(params_str, "url")
-                    .unwrap_or_else(|| entry.after_url.clone());
+                let url =
+                    extract_param_str(params_str, "url").unwrap_or_else(|| entry.after_url.clone());
                 if !url.is_empty() {
                     lines.push(format!("    await page.goto('{}');", escape_js(&url)));
                 }
@@ -102,9 +102,7 @@ pub fn handle_generate_test(state: &DaemonState, params: &Value) -> Result<Value
                 } else {
                     amount
                 };
-                lines.push(format!(
-                    "    await page.mouse.wheel(0, {delta});"
-                ));
+                lines.push(format!("    await page.mouse.wheel(0, {delta});"));
             }
             "select_option" => {
                 let sel = extract_param_str(params_str, "selector").unwrap_or_default();
@@ -155,9 +153,7 @@ pub fn handle_generate_test(state: &DaemonState, params: &Value) -> Result<Value
                             );
                         }
                         "delay" => {
-                            lines.push(format!(
-                                "    await page.waitForTimeout({value});"
-                            ));
+                            lines.push(format!("    await page.waitForTimeout({value});"));
                         }
                         "text_visible" => {
                             lines.push(format!(
@@ -166,19 +162,14 @@ pub fn handle_generate_test(state: &DaemonState, params: &Value) -> Result<Value
                             ));
                         }
                         _ => {
-                            lines.push(format!(
-                                "    // wait_for {condition}: {value}"
-                            ));
+                            lines.push(format!("    // wait_for {condition}: {value}"));
                         }
                     }
                 }
             }
             "assert" => {
                 if include_assertions {
-                    lines.push(format!(
-                        "    // assertion: {}",
-                        truncate(params_str, 80)
-                    ));
+                    lines.push(format!("    // assertion: {}", truncate(params_str, 80)));
                 }
             }
             _ => {
@@ -205,8 +196,7 @@ pub fn handle_generate_test(state: &DaemonState, params: &Value) -> Result<Value
             .to_string()
     };
 
-    fs::write(&file_path, &script)
-        .map_err(|e| format!("failed to write test file: {e}"))?;
+    fs::write(&file_path, &script).map_err(|e| format!("failed to write test file: {e}"))?;
 
     Ok(json!({
         "path": file_path,
@@ -267,9 +257,17 @@ mod tests {
         let state = DaemonState::new();
         {
             let mut tl = state.timeline.lock().unwrap();
-            tl.begin_action("navigate", r#"{"url":"https://example.com"}"#, "about:blank");
+            tl.begin_action(
+                "navigate",
+                r#"{"url":"https://example.com"}"#,
+                "about:blank",
+            );
             tl.finish_action(1, "https://example.com", "ok", "");
-            tl.begin_action("click", r#"{"selector":"button.submit"}"#, "https://example.com");
+            tl.begin_action(
+                "click",
+                r#"{"selector":"button.submit"}"#,
+                "https://example.com",
+            );
             tl.finish_action(2, "https://example.com", "ok", "");
         }
 

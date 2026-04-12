@@ -30,10 +30,7 @@ pub async fn handle_extract(page: &Page, params: &Value) -> Result<Value, String
         .await
         .map_err(|e| format!("extraction JS failed: {}", super::clean_cdp_error(&e)))?;
 
-    let raw_value = eval_result
-        .value()
-        .cloned()
-        .unwrap_or(Value::Null);
+    let raw_value = eval_result.value().cloned().unwrap_or(Value::Null);
 
     // The JS returns a JSON string, so parse it
     let data = if let Some(s) = raw_value.as_str() {

@@ -219,7 +219,9 @@ fn parse_ref(ref_str: &str) -> Result<(u64, String), String> {
     let version_str = parts[0];
     let key = parts[1];
     if !version_str.starts_with('v') {
-        return Err(format!("invalid ref format (version must start with v): {s}"));
+        return Err(format!(
+            "invalid ref format (version must start with v): {s}"
+        ));
     }
     let version: u64 = version_str[1..]
         .parse()
@@ -243,10 +245,7 @@ pub async fn handle_snapshot(
         .get("interactive_only")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
-    let limit = params
-        .get("limit")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(40);
+    let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(40);
     let mode = params.get("mode").and_then(|v| v.as_str());
 
     // Build the options JSON to pass into the IIFE
@@ -272,7 +271,12 @@ pub async fn handle_snapshot(
     let result = timeout(EVAL_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| "snapshot: JS evaluation timed out (10s)".to_string())?
-        .map_err(|e| format!("snapshot: JS evaluation failed: {}", super::clean_cdp_error(&e)))?;
+        .map_err(|e| {
+            format!(
+                "snapshot: JS evaluation failed: {}",
+                super::clean_cdp_error(&e)
+            )
+        })?;
 
     let raw_str = result
         .value()
@@ -300,10 +304,7 @@ pub async fn handle_snapshot(
     let (version, count) = {
         let mut store = state.refs.lock().unwrap();
         store.version += 1;
-        store.refs = refs
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
+        store.refs = refs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
         store.metadata = json!({
             "interactive_only": interactive_only,
             "limit": limit,
@@ -418,7 +419,12 @@ async fn resolve_ref(
     let result = timeout(EVAL_TIMEOUT, page.evaluate_expression(&js))
         .await
         .map_err(|_| "resolve_ref: JS evaluation timed out".to_string())?
-        .map_err(|e| format!("resolve_ref: JS evaluation failed: {}", super::clean_cdp_error(&e)))?;
+        .map_err(|e| {
+            format!(
+                "resolve_ref: JS evaluation failed: {}",
+                super::clean_cdp_error(&e)
+            )
+        })?;
 
     let raw_str = result
         .value()
@@ -438,9 +444,7 @@ async fn resolve_ref(
             .get("reason")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
-        return Err(format!(
-            "ref {ref_str} could not be resolved: {reason}"
-        ));
+        return Err(format!("ref {ref_str} could not be resolved: {reason}"));
     }
 
     let selector = resolution
@@ -449,10 +453,7 @@ async fn resolve_ref(
         .ok_or_else(|| "resolve_ref: resolution missing selector".to_string())?
         .to_string();
 
-    let tier = resolution
-        .get("tier")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let tier = resolution.get("tier").and_then(|v| v.as_u64()).unwrap_or(0);
 
     debug!("resolve_ref: {ref_str} → {selector} (tier {tier})");
 
@@ -547,9 +548,18 @@ pub async fn handle_fill_ref(
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing required parameter: text".to_string())?;
 
-    let slowly = params.get("slowly").and_then(|v| v.as_bool()).unwrap_or(false);
-    let clear_first = params.get("clear_first").and_then(|v| v.as_bool()).unwrap_or(false);
-    let submit = params.get("submit").and_then(|v| v.as_bool()).unwrap_or(false);
+    let slowly = params
+        .get("slowly")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let clear_first = params
+        .get("clear_first")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let submit = params
+        .get("submit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let (selector, tier, node) = resolve_ref(page, state, ref_str).await?;
 

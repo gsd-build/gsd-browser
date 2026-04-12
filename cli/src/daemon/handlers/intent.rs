@@ -9,8 +9,8 @@
 use super::interaction::handle_click;
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
-use gsd_browser_common::types::SettleOptions;
 use chromiumoxide::Page;
+use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
 use std::time::Duration;
 use tokio::time::timeout;
@@ -437,9 +437,7 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
         .unwrap_or_default();
 
     if candidates.is_empty() {
-        return Err(format!(
-            "act: no candidates found for intent '{intent}'"
-        ));
+        return Err(format!("act: no candidates found for intent '{intent}'"));
     }
 
     let top = &candidates[0];
@@ -451,7 +449,10 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
 
     // Phase 2: Execute the action
     let action_performed;
-    if matches!(intent, "search_field" | "fill_email" | "fill_password" | "fill_username") {
+    if matches!(
+        intent,
+        "search_field" | "fill_email" | "fill_password" | "fill_username"
+    ) {
         // Focus the search field instead of clicking
         let focus_js = format!(
             "(() => {{ const el = document.querySelector({sel}); if (!el) throw new Error('element not found'); el.focus(); return true; }})()",

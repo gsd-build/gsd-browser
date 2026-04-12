@@ -67,10 +67,7 @@ pub fn handle_action_cache(state: &DaemonState, params: &Value) -> Result<Value,
                 .get("selector")
                 .and_then(|v| v.as_str())
                 .ok_or("'selector' is required for action_cache put")?;
-            let score = params
-                .get("score")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(1.0);
+            let score = params.get("score").and_then(|v| v.as_f64()).unwrap_or(1.0);
 
             cache.entries.insert(
                 intent.to_string(),
@@ -193,10 +190,7 @@ pub async fn handle_check_injection(page: &Page, params: &Value) -> Result<Value
 
     let val = result.into_value::<Value>().unwrap_or(json!(null));
 
-    let findings = val
-        .get("findings")
-        .cloned()
-        .unwrap_or(json!([]));
+    let findings = val.get("findings").cloned().unwrap_or(json!([]));
 
     let finding_arr = findings.as_array().map(|a| a.len()).unwrap_or(0);
 
@@ -234,12 +228,14 @@ mod tests {
         assert_eq!(r["stored"], true);
 
         // Get — hit
-        let r = handle_action_cache(&state, &json!({"action": "get", "intent": "submit_form"})).unwrap();
+        let r = handle_action_cache(&state, &json!({"action": "get", "intent": "submit_form"}))
+            .unwrap();
         assert_eq!(r["found"], true);
         assert_eq!(r["selector"], "button[type=submit]");
 
         // Get — miss
-        let r = handle_action_cache(&state, &json!({"action": "get", "intent": "nonexistent"})).unwrap();
+        let r = handle_action_cache(&state, &json!({"action": "get", "intent": "nonexistent"}))
+            .unwrap();
         assert_eq!(r["found"], false);
 
         // Stats after 1 hit + 1 miss

@@ -85,11 +85,10 @@ pub fn handle_har_export(logs: &DaemonLogs, params: &Value) -> Result<Value, Str
             .to_string()
     };
 
-    let json_str = serde_json::to_string_pretty(&har)
-        .map_err(|e| format!("failed to serialize HAR: {e}"))?;
+    let json_str =
+        serde_json::to_string_pretty(&har).map_err(|e| format!("failed to serialize HAR: {e}"))?;
 
-    fs::write(&file_path, &json_str)
-        .map_err(|e| format!("failed to write HAR file: {e}"))?;
+    fs::write(&file_path, &json_str).map_err(|e| format!("failed to write HAR file: {e}"))?;
 
     Ok(json!({
         "path": file_path,
@@ -116,9 +115,7 @@ fn format_iso_timestamp(ts: f64) -> String {
     // Compute year/month/day from days since epoch (1970-01-01)
     let (year, month, day) = days_to_ymd(days);
 
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hours:02}:{minutes:02}:{seconds:02}.{millis:03}Z")
 }
 
 /// Convert days since 1970-01-01 to (year, month, day).

@@ -4,8 +4,8 @@
 //! JS evaluate calls into the Chrome page to install a MutationObserver, read
 //! the mutation counter + focus state, and poll until the DOM is quiet.
 
-use gsd_browser_common::types::{SettleOptions, SettleResult};
 use chromiumoxide::Page;
+use gsd_browser_common::types::{SettleOptions, SettleResult};
 use std::time::{Duration, Instant};
 use tokio::time::{sleep, timeout};
 use tracing::{debug, warn};
@@ -69,7 +69,12 @@ struct SettleState {
 
 /// Installs the MutationObserver on `window.__piMutationCounter` if not already present.
 pub async fn ensure_mutation_counter(page: &Page) {
-    match timeout(EVALUATE_TIMEOUT, page.evaluate_expression(INSTALL_MUTATION_COUNTER_JS)).await {
+    match timeout(
+        EVALUATE_TIMEOUT,
+        page.evaluate_expression(INSTALL_MUTATION_COUNTER_JS),
+    )
+    .await
+    {
         Ok(Ok(_)) => debug!("mutation counter installed"),
         Ok(Err(e)) => warn!("ensure_mutation_counter evaluate error: {e}"),
         Err(_) => warn!("ensure_mutation_counter timed out (25s)"),
@@ -177,9 +182,7 @@ pub async fn settle_after_action(page: &Page, opts: &SettleOptions) -> SettleRes
                 "dom_quiet"
             };
 
-            debug!(
-                "settle complete: reason={reason} ms={settle_ms} polls={polls}"
-            );
+            debug!("settle complete: reason={reason} ms={settle_ms} polls={polls}");
 
             return SettleResult {
                 settle_mode: "adaptive".into(),

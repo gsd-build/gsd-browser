@@ -79,8 +79,7 @@ fn encrypt(plaintext: &[u8], passphrase: &str) -> Result<EncryptedBlob, String> 
     OsRng.fill_bytes(&mut salt);
 
     let key = derive_key(passphrase, &salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("create cipher: {e}"))?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("create cipher: {e}"))?;
 
     let mut nonce_bytes = [0u8; NONCE_LEN];
     OsRng.fill_bytes(&mut nonce_bytes);
@@ -99,8 +98,7 @@ fn encrypt(plaintext: &[u8], passphrase: &str) -> Result<EncryptedBlob, String> 
 
 fn decrypt(blob: &EncryptedBlob, passphrase: &str) -> Result<Vec<u8>, String> {
     let key = derive_key(passphrase, &blob.salt)?;
-    let cipher = Aes256Gcm::new_from_slice(&key)
-        .map_err(|e| format!("create cipher: {e}"))?;
+    let cipher = Aes256Gcm::new_from_slice(&key).map_err(|e| format!("create cipher: {e}"))?;
 
     let nonce = Nonce::from_slice(&blob.nonce);
     cipher
@@ -127,10 +125,7 @@ pub async fn handle_vault_save(_page: &Page, params: &Value) -> Result<Value, St
         .get("password")
         .and_then(|v| v.as_str())
         .ok_or("missing 'password' parameter")?;
-    let extra_fields = params
-        .get("extra_fields")
-        .cloned()
-        .unwrap_or(json!({}));
+    let extra_fields = params.get("extra_fields").cloned().unwrap_or(json!({}));
 
     let entry = VaultEntry {
         url: url.to_string(),
@@ -139,16 +134,15 @@ pub async fn handle_vault_save(_page: &Page, params: &Value) -> Result<Value, St
         extra_fields,
     };
 
-    let plaintext = serde_json::to_vec(&entry)
-        .map_err(|e| format!("serialize vault entry: {e}"))?;
+    let plaintext =
+        serde_json::to_vec(&entry).map_err(|e| format!("serialize vault entry: {e}"))?;
     let blob = encrypt(&plaintext, &passphrase)?;
 
     let dir = vault_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("create vault dir: {e}"))?;
 
     let file_path = dir.join(format!("{profile}.enc"));
-    fs::write(&file_path, blob.to_bytes())
-        .map_err(|e| format!("write vault file: {e}"))?;
+    fs::write(&file_path, blob.to_bytes()).map_err(|e| format!("write vault file: {e}"))?;
 
     info!(
         "[auth_vault] saved profile '{}' for {} (url: {})",
