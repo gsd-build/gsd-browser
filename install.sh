@@ -93,16 +93,20 @@ download_binary() {
 
   chmod +x "$target"
 
-  # Ad-hoc sign on macOS to prevent Gatekeeper SIGKILL on unsigned binaries.
-  # This is a fallback — release binaries are Developer ID signed + notarized,
-  # but ad-hoc signing handles edge cases (manual builds, stripped signatures).
+  # On macOS, verify the binary is properly signed. Release binaries are
+  # Developer ID signed + notarized. Fall back to ad-hoc signing only if
+  # the binary has no valid signature (manual builds, stripped signatures).
   if [ "$(uname -s)" = "Darwin" ] && command -v codesign >/dev/null 2>&1; then
-    codesign --sign - --force "$target" 2>/dev/null && {
-      ok "Ad-hoc signed for macOS Gatekeeper"
-    } || {
-      warn "Ad-hoc signing failed — binary may be blocked by Gatekeeper"
-      warn "Fix manually: codesign --sign - --force $target"
-    }
+    if codesign --verify --strict "$target" 2>/dev/null; then
+      ok "Binary signature verified"
+    else
+      codesign --sign - --force "$target" 2>/dev/null && {
+        ok "Ad-hoc signed for macOS Gatekeeper"
+      } || {
+        warn "Ad-hoc signing failed — binary may be blocked by Gatekeeper"
+        warn "Fix manually: codesign --sign - --force $target"
+      }
+    fi
   fi
 
   ok "Binary installed: $target"
