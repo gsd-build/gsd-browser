@@ -7,25 +7,34 @@ use std::time::Duration;
 use tokio::net::UnixStream;
 use tokio::time::{sleep, timeout};
 
+fn read_daemon_pid(session: Option<&str>) -> Option<i32> {
+    let pid_file = pid_path_for(session);
+    let pid_str = fs::read_to_string(pid_file).ok()?;
+    pid_str.trim().parse().ok()
+}
+
+fn cleanup_daemon_artifacts(session: Option<&str>) {
+    let _ = fs::remove_file(socket_path_for(session));
+    let _ = fs::remove_file(pid_path_for(session));
+}
+
+fn live_daemon_recovery_error(session: Option<&str>, context: &str) -> Box<dyn std::error::Error> {
+    let stop_hint = match session {
+        Some(name) => format!("gsd-browser --session {name} daemon stop"),
+        None => "gsd-browser daemon stop".to_string(),
+    };
+
+    format!(
+        "{context}. Refusing to replace a live browser session automatically; stop it with `{stop_hint}` and retry"
+    )
+    .into()
+}
+
 /// Check if daemon is alive: PID file exists, process alive, socket connectable.
 pub fn is_daemon_alive(session: Option<&str>) -> bool {
-    let pid_file = pid_path_for(session);
-    if !pid_file.exists() {
-        return false;
-    }
-
-    let pid_str = match fs::read_to_string(&pid_file) {
-        Ok(s) => s,
-        Err(_) => return false,
-    };
-
-    let pid: i32 = match pid_str.trim().parse() {
-        Ok(p) => p,
-        Err(_) => return false,
-    };
-
-    // Check process alive via kill(pid, 0)
-    nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok()
+    read_daemon_pid(session)
+        .map(|pid| nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), None).is_ok())
+        .unwrap_or(false)
 }
 
 /// Start the daemon process. Spawns the daemon binary in the background and
@@ -64,15 +73,25 @@ pub async fn start_daemon(
     }
 
     // We hold the lock — check if daemon is already alive
-    if is_daemon_alive(session) && sock.exists() {
-        // Already running — release lock and return
+    if is_daemon_alive(session) {
+        let result = if sock.exists() {
+            Ok(())
+        } else {
+            match wait_for_socket(session, Duration::from_secs(10)).await {
+                Ok(()) => Ok(()),
+                Err(_) => Err(live_daemon_recovery_error(
+                    session,
+                    "daemon PID is alive but its socket is unavailable",
+                )),
+            }
+        };
+
         let _ = unsafe { libc::flock(fd, libc::LOCK_UN) };
-        return Ok(());
+        return result;
     }
 
     // Clean up stale files
-    let _ = fs::remove_file(socket_path_for(session));
-    let _ = fs::remove_file(pid_path_for(session));
+    cleanup_daemon_artifacts(session);
 
     // Spawn the daemon as a hidden subcommand of the current binary.
     let exe =
@@ -102,8 +121,7 @@ pub async fn start_daemon(
     // Wait for socket to appear and fail fast if the daemon exits during startup.
     let result = wait_for_spawned_daemon(session, &mut child, Duration::from_secs(10)).await;
     if result.is_err() {
-        let _ = fs::remove_file(socket_path_for(session));
-        let _ = fs::remove_file(pid_path_for(session));
+        cleanup_daemon_artifacts(session);
     }
 
     // Release lock
@@ -221,11 +239,17 @@ pub async fn send_request(
 
     match result {
         Ok(resp) => Ok(resp),
-        Err(_) => {
-            // Connection failed — daemon might have died. Restart and retry once.
+        Err(err) => {
+            if is_daemon_alive(session) {
+                return Err(live_daemon_recovery_error(
+                    session,
+                    &format!("request failed while the daemon PID was still alive: {err}"),
+                ));
+            }
+
+            // Connection failed and the daemon is gone — restart and retry once.
             eprintln!("[gsd-browser] daemon connection failed, restarting...");
-            let _ = fs::remove_file(socket_path_for(session));
-            let _ = fs::remove_file(pid_path_for(session));
+            cleanup_daemon_artifacts(session);
             start_daemon(browser_path, session).await?;
             send_once(method, params, session).await
         }
