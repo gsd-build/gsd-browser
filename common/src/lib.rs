@@ -95,6 +95,27 @@ impl DaemonResponse {
     }
 }
 
+// ── Input Sanitization ──
+
+/// Validates that a user-supplied name is safe for use as a filename component.
+/// Rejects path traversal attempts and OS-unsafe characters.
+pub fn sanitize_filename(name: &str) -> Result<&str, String> {
+    if name.is_empty() {
+        return Err("name must not be empty".to_string());
+    }
+    if name.contains('/')
+        || name.contains('\\')
+        || name.contains("..")
+        || name.contains('\0')
+        || name == "."
+    {
+        return Err(format!(
+            "invalid name: must not contain '/', '\\', '..', or null bytes — got '{name}'"
+        ));
+    }
+    Ok(name)
+}
+
 // ── Paths ──
 
 /// Returns the directory for gsd-browser state files (~/.gsd-browser)
