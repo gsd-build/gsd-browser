@@ -24,6 +24,7 @@ pub async fn handle_save_state(page: &Page, params: &Value) -> Result<Value, Str
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
+    let name = gsd_browser_common::sanitize_filename(name)?;
 
     // 1. Get cookies via CDP
     let cookies_resp = page
@@ -117,6 +118,7 @@ pub async fn handle_restore_state(page: &Page, params: &Value) -> Result<Value, 
         .get("name")
         .and_then(|v| v.as_str())
         .unwrap_or("default");
+    let name = gsd_browser_common::sanitize_filename(name)?;
 
     let file_path = state_dir().join(format!("{name}.json"));
     if !file_path.exists() {

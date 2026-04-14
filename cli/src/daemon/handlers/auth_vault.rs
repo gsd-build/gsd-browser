@@ -113,6 +113,7 @@ pub async fn handle_vault_save(_page: &Page, params: &Value) -> Result<Value, St
         .get("profile")
         .and_then(|v| v.as_str())
         .ok_or("missing 'profile' parameter")?;
+    let profile = gsd_browser_common::sanitize_filename(profile)?;
     let url = params
         .get("url")
         .and_then(|v| v.as_str())
@@ -169,6 +170,7 @@ pub async fn handle_vault_login(
         .get("profile")
         .and_then(|v| v.as_str())
         .ok_or("missing 'profile' parameter")?;
+    let profile = gsd_browser_common::sanitize_filename(profile)?;
 
     let file_path = vault_dir().join(format!("{profile}.enc"));
     if !file_path.exists() {

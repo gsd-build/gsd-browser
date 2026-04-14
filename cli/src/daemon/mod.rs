@@ -348,7 +348,7 @@ async fn dispatch(
     let params_summary = if record_timeline {
         let s = req.params.to_string();
         if s.len() > 80 {
-            format!("{}…", &s[..79])
+            format!("{}…", s.chars().take(79).collect::<String>())
         } else {
             s
         }
