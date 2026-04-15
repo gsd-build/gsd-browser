@@ -16,6 +16,12 @@ pub struct Cli {
     #[arg(long, global = true)]
     browser_path: Option<String>,
 
+    /// CDP WebSocket URL to attach to an already-running Chrome
+    /// (e.g. one launched with --remote-debugging-port=9222).
+    /// Accepts ws:// URLs or http:// endpoints.
+    #[arg(long, global = true)]
+    cdp_url: Option<String>,
+
     /// Named session for parallel daemon instances
     #[arg(long, global = true)]
     session: Option<String>,
@@ -570,6 +576,9 @@ enum Commands {
         /// Path to Chrome/Chromium binary
         #[arg(long)]
         browser_path: Option<String>,
+        /// CDP WebSocket URL to attach to an already-running Chrome
+        #[arg(long)]
+        cdp_url: Option<String>,
         /// Named session
         #[arg(long)]
         session: Option<String>,
@@ -599,17 +608,21 @@ async fn main() {
     let config = Config::load();
 
     // Layer 5: CLI flags override config.
-    // If no --browser-path CLI flag was provided, use config value as fallback.
+    // If no CLI flag was provided, use config value as fallback.
     if cli.browser_path.is_none() {
         cli.browser_path = config.browser.path.clone();
+    }
+    if cli.cdp_url.is_none() {
+        cli.cdp_url = config.browser.cdp_url.clone();
     }
 
     let result = match &cli.command {
         Commands::Serve {
             browser_path,
+            cdp_url,
             session,
         } => {
-            if let Err(e) = daemon::run(browser_path.clone(), session.clone()).await {
+            if let Err(e) = daemon::run(browser_path.clone(), session.clone(), cdp_url.clone()).await {
                 eprintln!("[gsd-browser-daemon] fatal: {e}");
                 std::process::exit(1);
             }
@@ -889,7 +902,7 @@ async fn main() {
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
 
 async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
-    daemon_client::start_daemon(cli.browser_path.as_deref(), cli.session.as_deref()).await?;
+    daemon_client::start_daemon(cli.browser_path.as_deref(), cli.cdp_url.as_deref(), cli.session.as_deref()).await?;
     if cli.json {
         println!("{}", serde_json::json!({"status": "started"}));
     } else {
@@ -913,6 +926,7 @@ async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
         "health",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -947,6 +961,7 @@ async fn cmd_navigate(cli: &Cli, url: &str) -> CmdResult {
         "navigate",
         serde_json::json!({"url": url}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -958,6 +973,7 @@ async fn cmd_back(cli: &Cli) -> CmdResult {
         "back",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -969,6 +985,7 @@ async fn cmd_forward(cli: &Cli) -> CmdResult {
         "forward",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -980,6 +997,7 @@ async fn cmd_reload(cli: &Cli) -> CmdResult {
         "reload",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -991,6 +1009,7 @@ async fn cmd_console(cli: &Cli, no_clear: bool) -> CmdResult {
         "console",
         serde_json::json!({"clear": !no_clear}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1002,6 +1021,7 @@ async fn cmd_network(cli: &Cli, no_clear: bool, filter: &str) -> CmdResult {
         "network",
         serde_json::json!({"clear": !no_clear, "filter": filter}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1013,6 +1033,7 @@ async fn cmd_dialog(cli: &Cli, no_clear: bool) -> CmdResult {
         "dialog",
         serde_json::json!({"clear": !no_clear}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1024,6 +1045,7 @@ async fn cmd_eval(cli: &Cli, expression: &str) -> CmdResult {
         "eval",
         serde_json::json!({"expression": expression}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1045,6 +1067,7 @@ async fn cmd_click(cli: &Cli, selector: Option<&str>, x: Option<f64>, y: Option<
         "click",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1069,6 +1092,7 @@ async fn cmd_type(
             "submit": submit,
         }),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1080,6 +1104,7 @@ async fn cmd_press(cli: &Cli, key: &str) -> CmdResult {
         "press",
         serde_json::json!({"key": key}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1091,6 +1116,7 @@ async fn cmd_hover(cli: &Cli, selector: &str) -> CmdResult {
         "hover",
         serde_json::json!({"selector": selector}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1102,6 +1128,7 @@ async fn cmd_scroll(cli: &Cli, direction: &str, amount: i32) -> CmdResult {
         "scroll",
         serde_json::json!({"direction": direction, "amount": amount}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1113,6 +1140,7 @@ async fn cmd_select_option(cli: &Cli, selector: &str, option: &str) -> CmdResult
         "select_option",
         serde_json::json!({"selector": selector, "option": option}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1124,6 +1152,7 @@ async fn cmd_set_checked(cli: &Cli, selector: &str, checked: bool) -> CmdResult 
         "set_checked",
         serde_json::json!({"selector": selector, "checked": checked}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1135,6 +1164,7 @@ async fn cmd_drag(cli: &Cli, source: &str, target: &str) -> CmdResult {
         "drag",
         serde_json::json!({"source": source, "target": target}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1161,6 +1191,7 @@ async fn cmd_set_viewport(
         "set_viewport",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1172,6 +1203,7 @@ async fn cmd_upload_file(cli: &Cli, selector: &str, files: &[String]) -> CmdResu
         "upload_file",
         serde_json::json!({"selector": selector, "files": files}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1199,6 +1231,7 @@ async fn cmd_screenshot(
         "screenshot",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1258,6 +1291,7 @@ async fn cmd_accessibility_tree(
         "accessibility_tree",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1285,6 +1319,7 @@ async fn cmd_find(
         "find",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1300,6 +1335,7 @@ async fn cmd_page_source(cli: &Cli, selector: Option<&str>) -> CmdResult {
         "page_source",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1327,6 +1363,7 @@ async fn cmd_wait_for(
         "wait_for",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1338,6 +1375,7 @@ async fn cmd_timeline(cli: &Cli, write_to_disk: bool) -> CmdResult {
         "timeline",
         serde_json::json!({"write_to_disk": write_to_disk}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1365,6 +1403,7 @@ async fn cmd_snapshot(
         "snapshot",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1376,6 +1415,7 @@ async fn cmd_get_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "get_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1387,6 +1427,7 @@ async fn cmd_click_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "click_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1398,6 +1439,7 @@ async fn cmd_hover_ref(cli: &Cli, ref_str: &str) -> CmdResult {
         "hover_ref",
         serde_json::json!({"ref": ref_str}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1422,6 +1464,7 @@ async fn cmd_fill_ref(
             "slowly": slowly,
         }),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1436,6 +1479,7 @@ async fn cmd_assert(cli: &Cli, checks: &str) -> CmdResult {
         "assert",
         serde_json::json!({"checks": checks_value}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1451,6 +1495,7 @@ async fn cmd_diff(cli: &Cli, since: Option<u64>) -> CmdResult {
         "diff",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1469,6 +1514,7 @@ async fn cmd_batch(cli: &Cli, steps: &str, stop_on_failure: bool, summary_only: 
             "summary_only": summary_only,
         }),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1480,6 +1526,7 @@ async fn cmd_list_pages(cli: &Cli) -> CmdResult {
         "list_pages",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1491,6 +1538,7 @@ async fn cmd_switch_page(cli: &Cli, id: u64) -> CmdResult {
         "switch_page",
         serde_json::json!({"id": id}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1502,6 +1550,7 @@ async fn cmd_close_page(cli: &Cli, id: u64) -> CmdResult {
         "close_page",
         serde_json::json!({"id": id}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1513,6 +1562,7 @@ async fn cmd_list_frames(cli: &Cli) -> CmdResult {
         "list_frames",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1539,6 +1589,7 @@ async fn cmd_select_frame(
         "select_frame",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1554,6 +1605,7 @@ async fn cmd_analyze_form(cli: &Cli, selector: Option<&str>) -> CmdResult {
         "analyze_form",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1574,6 +1626,7 @@ async fn cmd_fill_form(cli: &Cli, values: &str, selector: Option<&str>, submit: 
         "fill_form",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1589,6 +1642,7 @@ async fn cmd_find_best(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResul
         "find_best",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1604,6 +1658,7 @@ async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
         "act",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1615,6 +1670,7 @@ async fn cmd_session_summary(cli: &Cli) -> CmdResult {
         "session_summary",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1630,6 +1686,7 @@ async fn cmd_debug_bundle(cli: &Cli, name: Option<&str>) -> CmdResult {
         "debug_bundle",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1659,6 +1716,7 @@ async fn cmd_visual_diff(
         "visual_diff",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1683,6 +1741,7 @@ async fn cmd_zoom_region(
             "scale": scale,
         }),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1710,6 +1769,7 @@ async fn cmd_save_pdf(
         "save_pdf",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1730,6 +1790,7 @@ async fn cmd_extract(cli: &Cli, schema: &str, selector: Option<&str>, multiple: 
         "extract",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1767,6 +1828,7 @@ async fn cmd_mock_route(
         "mock_route",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1778,6 +1840,7 @@ async fn cmd_block_urls(cli: &Cli, patterns: &[String]) -> CmdResult {
         "block_urls",
         serde_json::json!({"patterns": patterns}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1789,6 +1852,7 @@ async fn cmd_clear_routes(cli: &Cli) -> CmdResult {
         "clear_routes",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1800,6 +1864,7 @@ async fn cmd_emulate_device(cli: &Cli, device: &str) -> CmdResult {
         "emulate_device",
         serde_json::json!({"device": device}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1811,6 +1876,7 @@ async fn cmd_save_state(cli: &Cli, name: &str) -> CmdResult {
         "save_state",
         serde_json::json!({"name": name}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1822,6 +1888,7 @@ async fn cmd_restore_state(cli: &Cli, name: &str) -> CmdResult {
         "restore_state",
         serde_json::json!({"name": name}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1851,6 +1918,7 @@ async fn cmd_vault_save(
         "vault_save",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1862,6 +1930,7 @@ async fn cmd_vault_login(cli: &Cli, profile: &str) -> CmdResult {
         "vault_login",
         serde_json::json!({"profile": profile}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1873,6 +1942,7 @@ async fn cmd_vault_list(cli: &Cli) -> CmdResult {
         "vault_list",
         serde_json::json!({}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1900,6 +1970,7 @@ async fn cmd_action_cache(
         "action_cache",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1911,6 +1982,7 @@ async fn cmd_check_injection(cli: &Cli, include_hidden: bool) -> CmdResult {
         "check_injection",
         serde_json::json!({"includeHidden": include_hidden}),
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1934,6 +2006,7 @@ async fn cmd_generate_test(
         "generate_test",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1949,6 +2022,7 @@ async fn cmd_har_export(cli: &Cli, filename: Option<&str>) -> CmdResult {
         "har_export",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1964,6 +2038,7 @@ async fn cmd_trace_start(cli: &Cli, name: Option<&str>) -> CmdResult {
         "trace_start",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;
@@ -1979,6 +2054,7 @@ async fn cmd_trace_stop(cli: &Cli, name: Option<&str>) -> CmdResult {
         "trace_stop",
         params,
         cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
         cli.session.as_deref(),
     )
     .await?;

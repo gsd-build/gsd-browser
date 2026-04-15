@@ -111,6 +111,7 @@ Example `gsd-browser.toml`:
 ```toml
 [browser]
 path = "/usr/bin/chromium"
+cdp_url = "http://localhost:9222"   # attach to existing Chrome instead of launching
 headless = true
 
 [daemon]
@@ -142,6 +143,7 @@ Supported environment variable overrides use `GSD_BROWSER_<SECTION>_<FIELD>` nam
 
 ```bash
 export GSD_BROWSER_BROWSER_PATH=/usr/bin/chromium
+export GSD_BROWSER_BROWSER_CDP_URL=http://localhost:9222
 export GSD_BROWSER_BROWSER_HEADLESS=true
 export GSD_BROWSER_DAEMON_PORT=9333
 export GSD_BROWSER_SCREENSHOT_QUALITY=90

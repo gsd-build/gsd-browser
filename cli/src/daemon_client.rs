@@ -41,6 +41,7 @@ pub fn is_daemon_alive(session: Option<&str>) -> bool {
 /// waits for the socket to appear.
 pub async fn start_daemon(
     browser_path: Option<&str>,
+    cdp_url: Option<&str>,
     session: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Ensure state dir exists (and session subdir if needed)
@@ -101,6 +102,9 @@ pub async fn start_daemon(
     cmd.arg("_serve");
     if let Some(path) = browser_path {
         cmd.arg("--browser-path").arg(path);
+    }
+    if let Some(url) = cdp_url {
+        cmd.arg("--cdp-url").arg(url);
     }
     if let Some(name) = session {
         cmd.arg("--session").arg(name);
@@ -227,11 +231,12 @@ pub async fn send_request(
     method: &str,
     params: serde_json::Value,
     browser_path: Option<&str>,
+    cdp_url: Option<&str>,
     session: Option<&str>,
 ) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     // Ensure daemon is running
     if !is_daemon_alive(session) || !socket_path_for(session).exists() {
-        start_daemon(browser_path, session).await?;
+        start_daemon(browser_path, cdp_url, session).await?;
     }
 
     // Connect and send
@@ -250,7 +255,7 @@ pub async fn send_request(
             // Connection failed and the daemon is gone — restart and retry once.
             eprintln!("[gsd-browser] daemon connection failed, restarting...");
             cleanup_daemon_artifacts(session);
-            start_daemon(browser_path, session).await?;
+            start_daemon(browser_path, cdp_url, session).await?;
             send_once(method, params, session).await
         }
     }

@@ -43,6 +43,10 @@ impl Default for Config {
 pub struct BrowserConfig {
     /// Path to Chrome/Chromium binary. None = auto-detect.
     pub path: Option<String>,
+    /// CDP WebSocket URL to connect to an already-running Chrome instance
+    /// (e.g. one launched with --remote-debugging-port=9222).
+    /// When set, gsd-browser attaches instead of launching a new browser.
+    pub cdp_url: Option<String>,
     /// Extra arguments passed to Chrome on launch.
     pub args: Vec<String>,
     /// Whether to launch headless (default: false — visible by default).
@@ -53,6 +57,7 @@ impl Default for BrowserConfig {
     fn default() -> Self {
         Self {
             path: None,
+            cdp_url: None,
             args: Vec::new(),
             headless: false,
         }
@@ -278,6 +283,9 @@ impl Config {
         // Browser
         if let Ok(v) = std::env::var("GSD_BROWSER_BROWSER_PATH") {
             self.browser.path = Some(v);
+        }
+        if let Ok(v) = std::env::var("GSD_BROWSER_BROWSER_CDP_URL") {
+            self.browser.cdp_url = Some(v);
         }
         if let Ok(v) = std::env::var("GSD_BROWSER_BROWSER_HEADLESS") {
             if let Ok(b) = v.parse::<bool>() {

@@ -422,6 +422,7 @@ Available on all commands:
 |------|-------------|
 | `--json` | Output as JSON (use when parsing output programmatically) |
 | `--browser-path <path>` | Path to Chrome/Chromium binary |
+| `--cdp-url <url>` | Attach to an already-running Chrome (e.g. `http://localhost:9222`) |
 | `--session <name>` | Named session for parallel browser instances |
 
 ---
