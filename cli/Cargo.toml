@@ -34,3 +34,4 @@ regex-lite = "0.1"
 aes-gcm = { workspace = true }
 argon2 = { workspace = true }
 rand = { workspace = true }
+reqwest = { workspace = true }

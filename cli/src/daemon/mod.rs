@@ -29,6 +29,7 @@ use tracing::{debug, error, info, warn};
 pub async fn run(
     browser_path: Option<String>,
     session: Option<String>,
+    cdp_url: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
     let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
@@ -42,7 +43,7 @@ pub async fn run(
         .with_writer(std::io::stderr)
         .init();
 
-    run_daemon(browser_path, session).await
+    run_daemon(browser_path, session, cdp_url).await
 }
 
 async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
@@ -71,6 +72,7 @@ async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
 async fn run_daemon(
     browser_path_arg: Option<String>,
     session_arg: Option<String>,
+    cdp_url_arg: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
@@ -79,8 +81,9 @@ async fn run_daemon(
         config.settle.timeout_ms, config.screenshot.quality
     );
 
-    // CLI --browser-path flag overrides config
+    // CLI flags override config
     let effective_browser_path = browser_path_arg.or_else(|| config.browser.path.clone());
+    let effective_cdp_url = cdp_url_arg.or_else(|| config.browser.cdp_url.clone());
 
     let session = session_arg.as_deref();
 
@@ -135,37 +138,73 @@ async fn run_daemon(
         pid_file_path
     );
 
-    // Discover and launch Chrome
-    let chrome_path = gsd_browser_common::chrome::find_chrome(effective_browser_path.as_deref())
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-    info!(
-        "[gsd-browser-daemon] launching Chrome from {:?}",
-        chrome_path
-    );
+    let (mut browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
+        // Connect to an already-running Chrome instance via CDP
+        info!(
+            "[gsd-browser-daemon] connecting to existing Chrome at {}",
+            cdp_url
+        );
 
-    // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
-    // Clean it up proactively before launch.
-    let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
-    let lock = runner_dir.join("SingletonLock");
-    if lock.exists() {
-        warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
-        let _ = fs::remove_file(&lock);
-        let _ = fs::remove_dir_all(&runner_dir);
-    }
+        // chromiumoxide needs the WebSocket debugger URL. If the user passed
+        // an HTTP endpoint (e.g. http://localhost:9222), fetch /json/version
+        // to discover the ws URL automatically.
+        let ws_url = if cdp_url.starts_with("ws://") || cdp_url.starts_with("wss://") {
+            cdp_url.clone()
+        } else {
+            let version_url = format!("{}/json/version", cdp_url.trim_end_matches('/'));
+            let body: serde_json::Value = reqwest::get(&version_url)
+                .await
+                .map_err(|e| format!("failed to reach Chrome debug endpoint at {version_url}: {e}"))?
+                .json()
+                .await
+                .map_err(|e| format!("invalid JSON from {version_url}: {e}"))?;
+            body["webSocketDebuggerUrl"]
+                .as_str()
+                .ok_or_else(|| format!("Chrome at {cdp_url} did not return webSocketDebuggerUrl — is --remote-debugging-port enabled?"))?
+                .to_string()
+        };
 
-    let mut builder = BrowserConfig::builder()
-        .chrome_executable(chrome_path)
-        .window_size(1920, 1080)
-        .arg("--window-size=1920,1080");
-    if !config.browser.headless {
-        builder = builder.with_head();
-    }
-    let browser_config = builder
-        .build()
-        .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        info!("[gsd-browser-daemon] resolved WebSocket URL: {}", ws_url);
+        let result = Browser::connect(&ws_url).await
+            .map_err(|e| -> Box<dyn std::error::Error> {
+                format!("failed to connect to Chrome CDP at {ws_url}: {e}").into()
+            })?;
+        info!("[gsd-browser-daemon] connected to existing Chrome successfully");
+        result
+    } else {
+        // Launch a new Chrome instance
+        let chrome_path = gsd_browser_common::chrome::find_chrome(effective_browser_path.as_deref())
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        info!(
+            "[gsd-browser-daemon] launching Chrome from {:?}",
+            chrome_path
+        );
 
-    let (mut browser, mut handler) = Browser::launch(browser_config).await?;
-    info!("[gsd-browser-daemon] Chrome launched successfully");
+        // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
+        // Clean it up proactively before launch.
+        let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
+        let lock = runner_dir.join("SingletonLock");
+        if lock.exists() {
+            warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
+            let _ = fs::remove_file(&lock);
+            let _ = fs::remove_dir_all(&runner_dir);
+        }
+
+        let mut builder = BrowserConfig::builder()
+            .chrome_executable(chrome_path)
+            .window_size(1920, 1080)
+            .arg("--window-size=1920,1080");
+        if !config.browser.headless {
+            builder = builder.with_head();
+        }
+        let browser_config = builder
+            .build()
+            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+
+        let result = Browser::launch(browser_config).await?;
+        info!("[gsd-browser-daemon] Chrome launched successfully");
+        result
+    };
 
     // Handler must be polled continuously — spawn it
     let handler_task = tokio::spawn(async move {
