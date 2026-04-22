@@ -5,11 +5,12 @@
 //! `handle_diff` compares current page state against stored snapshots.
 
 use crate::daemon::capture::capture_compact_page_state;
+use crate::daemon::inspection;
 use crate::daemon::logs::DaemonLogs;
 use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use serde_json::{json, Value};
-use tracing::debug;
+use std::collections::HashMap;
 
 // ── Threshold parsing ──
 
@@ -80,42 +81,6 @@ fn threshold_display(threshold: &Threshold) -> String {
     format!("{op}{}", threshold.val)
 }
 
-// ── Selector batch evaluation ──
-
-/// JS to batch-evaluate visibility, value, and checked for a set of selectors.
-fn build_batch_eval_js(selectors: &[String]) -> String {
-    let selector_array: Vec<String> = selectors
-        .iter()
-        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
-        .collect();
-    format!(
-        r#"(() => {{
-    const selectors = [{}];
-    const result = {{}};
-    for (const sel of selectors) {{
-        const el = document.querySelector(sel);
-        if (!el) {{
-            result[sel] = {{ exists: false, visible: false, value: null, checked: false }};
-        }} else {{
-            const rect = el.getBoundingClientRect();
-            const style = window.getComputedStyle(el);
-            const visible = rect.width > 0 && rect.height > 0 &&
-                            style.display !== 'none' && style.visibility !== 'hidden' &&
-                            style.opacity !== '0';
-            result[sel] = {{
-                exists: true,
-                visible,
-                value: el.value !== undefined ? String(el.value) : null,
-                checked: !!el.checked,
-            }};
-        }}
-    }}
-    return JSON.stringify(result);
-}})();"#,
-        selector_array.join(", ")
-    )
-}
-
 // ── Assert handler ──
 
 pub async fn handle_assert(
@@ -133,39 +98,14 @@ pub async fn handle_assert(
         return Err("'checks' array is empty".into());
     }
 
-    // Capture current page state
-    let page_state = capture_compact_page_state(page, true).await;
-
-    // Collect unique selectors for batch evaluation
-    let mut selectors: Vec<String> = Vec::new();
-    for check in checks {
-        if let Some(sel) = check.get("selector").and_then(|v| v.as_str()) {
-            if !sel.is_empty() && !selectors.contains(&sel.to_string()) {
-                selectors.push(sel.to_string());
-            }
-        }
-    }
-
-    // Batch-evaluate selectors if any
-    let selector_states: Value = if !selectors.is_empty() {
-        let js = build_batch_eval_js(&selectors);
-        match page.evaluate_expression(&js).await {
-            Ok(result) => match result.into_value::<String>() {
-                Ok(json_str) => serde_json::from_str(&json_str).unwrap_or(json!({})),
-                Err(_) => json!({}),
-            },
-            Err(e) => {
-                debug!("batch selector eval failed: {e}");
-                json!({})
-            }
-        }
-    } else {
-        json!({})
-    };
-
     // Snapshot console/network logs (non-destructive)
     let console_entries = logs.console.snapshot();
     let network_entries = logs.network.snapshot();
+    let mut selector_cache: HashMap<String, Value> = HashMap::new();
+    let mut text_cache: HashMap<String, Value> = HashMap::new();
+    let target_url = inspection::target_url(page, state)
+        .await
+        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
 
     // Evaluate each check
     let mut results: Vec<Value> = Vec::new();
@@ -194,41 +134,77 @@ pub async fn handle_assert(
 
         let (passed, expected, actual) = match kind {
             "url_contains" => {
-                let actual_url = &page_state.url;
+                let actual_url = target_url
+                    .get("url")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let pass = actual_url.contains(text);
-                (pass, format!("URL contains '{text}'"), actual_url.clone())
+                (pass, format!("URL contains '{text}'"), actual_url.to_string())
             }
             "text_visible" => {
-                let body = &page_state.body_text;
-                let pass = body.contains(text);
-                let snippet = if body.len() > 100 {
-                    format!("{}…", &body[..100])
-                } else {
-                    body.clone()
-                };
-                (pass, format!("text '{text}' visible"), snippet)
-            }
-            "text_hidden" => {
-                let body = &page_state.body_text;
-                let pass = !body.contains(text);
-                let snippet = if body.len() > 100 {
-                    format!("{}…", &body[..100])
-                } else {
-                    body.clone()
-                };
-                (pass, format!("text '{text}' hidden"), snippet)
-            }
-            "selector_visible" => {
-                let sel_state = &selector_states[selector];
-                let pass = sel_state
-                    .get("visible")
+                if !text_cache.contains_key(text) {
+                    let result = inspection::text_query(page, state, text, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    text_cache.insert(text.to_string(), result);
+                }
+                let text_result = text_cache.get(text).cloned().unwrap_or_else(|| json!({}));
+                let pass = text_result
+                    .get("found")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let actual_str = if sel_state
-                    .get("exists")
+                let snippet = text_result
+                    .get("matches")
+                    .and_then(|v| v.as_array())
+                    .and_then(|matches| matches.first())
+                    .and_then(|first| first.get("snippet"))
+                    .and_then(|snippet| snippet.as_str())
+                    .unwrap_or("");
+                (pass, format!("text '{text}' visible"), snippet.to_string())
+            }
+            "text_hidden" => {
+                if !text_cache.contains_key(text) {
+                    let result = inspection::text_query(page, state, text, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    text_cache.insert(text.to_string(), result);
+                }
+                let text_result = text_cache.get(text).cloned().unwrap_or_else(|| json!({}));
+                let pass = !text_result
+                    .get("found")
                     .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-                {
+                    .unwrap_or(false);
+                let snippet = text_result
+                    .get("matches")
+                    .and_then(|v| v.as_array())
+                    .and_then(|matches| matches.first())
+                    .and_then(|first| first.get("snippet"))
+                    .and_then(|snippet| snippet.as_str())
+                    .unwrap_or("");
+                (pass, format!("text '{text}' hidden"), snippet.to_string())
+            }
+            "selector_visible" => {
+                if !selector_cache.contains_key(selector) {
+                    let result = inspection::selector_query(page, state, selector, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    selector_cache.insert(selector.to_string(), result);
+                }
+                let sel_state = selector_cache
+                    .get(selector)
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let pass = sel_state
+                    .get("first")
+                    .and_then(|v| v.get("visible"))
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let exists = sel_state
+                    .get("count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    > 0;
+                let actual_str = if exists {
                     if pass {
                         "visible"
                     } else {
@@ -244,15 +220,26 @@ pub async fn handle_assert(
                 )
             }
             "selector_hidden" => {
-                let sel_state = &selector_states[selector];
+                if !selector_cache.contains_key(selector) {
+                    let result = inspection::selector_query(page, state, selector, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    selector_cache.insert(selector.to_string(), result);
+                }
+                let sel_state = selector_cache
+                    .get(selector)
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 let is_visible = sel_state
-                    .get("visible")
+                    .get("first")
+                    .and_then(|v| v.get("visible"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let exists = sel_state
-                    .get("exists")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
+                    .get("count")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0)
+                    > 0;
                 // Hidden means: doesn't exist OR not visible
                 let pass = !exists || !is_visible;
                 let actual_str = if !exists {
@@ -265,18 +252,38 @@ pub async fn handle_assert(
                 (pass, format!("'{selector}' hidden"), actual_str.to_string())
             }
             "value_equals" => {
-                let sel_state = &selector_states[selector];
+                if !selector_cache.contains_key(selector) {
+                    let result = inspection::selector_query(page, state, selector, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    selector_cache.insert(selector.to_string(), result);
+                }
+                let sel_state = selector_cache
+                    .get(selector)
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 let actual_val = sel_state
-                    .get("value")
+                    .get("first")
+                    .and_then(|v| v.get("value"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 let pass = actual_val == value;
                 (pass, format!("value == '{value}'"), actual_val.to_string())
             }
             "checked" => {
-                let sel_state = &selector_states[selector];
+                if !selector_cache.contains_key(selector) {
+                    let result = inspection::selector_query(page, state, selector, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    selector_cache.insert(selector.to_string(), result);
+                }
+                let sel_state = selector_cache
+                    .get(selector)
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
                 let actual_checked = sel_state
-                    .get("checked")
+                    .get("first")
+                    .and_then(|v| v.get("checked"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
                 let pass = actual_checked == checked_expected;
@@ -392,15 +399,26 @@ pub async fn handle_assert(
                 if selector.is_empty() {
                     return Err("element_count requires 'selector'".into());
                 }
-                // Count matching elements via JS (querySelectorAll covers hidden elements too)
-                let js = format!(
-                    "document.querySelectorAll({:?}).length",
-                    selector
-                );
-                let count: i64 = match page.evaluate_expression(&js).await {
-                    Ok(result) => result.into_value::<i64>().unwrap_or(0),
-                    Err(_) => 0,
-                };
+                if !selector_cache.contains_key(selector) {
+                    let result = inspection::selector_query(page, state, selector, true)
+                        .await
+                        .unwrap_or_else(|err| json!({"ok": false, "error": err}));
+                    selector_cache.insert(selector.to_string(), result);
+                }
+                let sel_state = selector_cache
+                    .get(selector)
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                let count = sel_state
+                    .get("count")
+                    .and_then(|v| v.as_i64())
+                    .or_else(|| {
+                        sel_state
+                            .get("count")
+                            .and_then(|v| v.as_u64())
+                            .map(|v| v as i64)
+                    })
+                    .unwrap_or(0);
 
                 let min = check.get("min").and_then(|v| v.as_i64());
                 let max = check.get("max").and_then(|v| v.as_i64());

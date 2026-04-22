@@ -13,7 +13,7 @@ allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 
 <essential_principles>
 
-**The daemon auto-starts.** Never run `gsd-browser daemon start`. It launches on first command. Only use `daemon stop` to clean up when finished.
+**The daemon auto-starts on browser commands.** `gsd-browser daemon health` reports state and does not start a session. Use `gsd-browser daemon start` only when you want to pre-warm or verify daemon lifecycle explicitly.
 
 **Always re-snapshot after page changes.** Refs are versioned (`@v1:e1`, `@v2:e3`). After navigation, form submission, or dynamic content loading, old refs are stale. Run `gsd-browser snapshot` to get fresh refs before interacting.
 
@@ -43,6 +43,7 @@ gsd-browser snapshot  # REQUIRED - old refs are now stale
 |------|---------|
 | `--json` | Structured JSON output |
 | `--browser-path <path>` | Path to Chrome/Chromium |
+| `--cdp-url <url>` | Attach to an already-running Chrome instance |
 | `--session <name>` | Named session for parallel instances |
 
 </essential_principles>

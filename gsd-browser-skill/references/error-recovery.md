@@ -59,17 +59,16 @@ gsd-browser network                    # Check BEFORE next navigation
 
 <error name="session_about_blank">
 
-**Error:** `session-summary` or `list-pages` shows `about:blank` after navigating.
+**Error:** `daemon health` reports `stopped` or `unhealthy`, or a named session opens a fresh blank page.
 
-**Cause:** On versions before v0.1.7, the page registry did not sync metadata after navigation. The browser was on the correct page but the registry still reported the initial `about:blank`.
+**Cause:** The named session does not currently map to a live daemon/browser pair, or the follow-up command used a different session name.
 
-**Fix:** Upgrade to v0.1.7+. If stuck on an older version, use batch to keep everything in one daemon connection:
+**Fix:** Check the session state, clear it explicitly, and retry with the same session name:
 
 ```bash
-gsd-browser batch --steps '[
-  {"action": "navigate", "url": "https://example.com"},
-  {"action": "assert", "checks": [{"kind": "url_contains", "text": "example"}]}
-]'
+gsd-browser --session site1 daemon health
+gsd-browser --session site1 daemon stop
+gsd-browser --session site1 navigate https://example.com
 ```
 
 </error>
@@ -78,14 +77,14 @@ gsd-browser batch --steps '[
 
 **Error:** `daemon did not start within 10s`
 
-**Cause:** Stale Chrome lock file or zombie process.
+**Cause:** The session is unhealthy, startup exited early, or browser launch state is stale.
 
 **Fix:**
 
 ```bash
 gsd-browser daemon stop
-rm -f /tmp/chromiumoxide-runner/SingletonLock
-gsd-browser daemon health              # Retry (auto-starts)
+gsd-browser daemon start
+gsd-browser daemon health
 ```
 
 </error>

@@ -1,6 +1,8 @@
 //! Wait-for handler: polls for 11 different conditions with configurable timeout.
 
+use crate::daemon::inspection;
 use crate::daemon::logs::DaemonLogs;
+use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use serde_json::{json, Value};
 use std::collections::hash_map::DefaultHasher;
@@ -16,6 +18,7 @@ const POLL_INTERVAL_MS: u64 = 100;
 pub async fn handle_wait_for(
     page: &Page,
     logs: &DaemonLogs,
+    state: &DaemonState,
     params: &Value,
 ) -> Result<Value, String> {
     let condition = params
@@ -50,42 +53,56 @@ pub async fn handle_wait_for(
         }
         "selector_visible" => {
             poll_until(deadline, poll_interval, || async {
-                eval_bool(page, &format!(
-                    r#"(() => {{ const el = document.querySelector({sel}); if (!el) return false; const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }})()"#,
-                    sel = js_string(value)
-                )).await
+                inspection::selector_query(page, state, value, true)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("first").cloned())
+                    .and_then(|first| first.get("visible").and_then(|visible| visible.as_bool()))
+                    .unwrap_or(false)
             }).await
         }
         "selector_hidden" => {
             poll_until(deadline, poll_interval, || async {
-                eval_bool(page, &format!(
-                    r#"(() => {{ const el = document.querySelector({sel}); if (!el) return true; const r = el.getBoundingClientRect(); return r.width === 0 || r.height === 0; }})()"#,
-                    sel = js_string(value)
-                )).await
+                match inspection::selector_query(page, state, value, true).await {
+                    Ok(result) => {
+                        let count = result.get("count").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let visible = result
+                            .get("first")
+                            .and_then(|first| first.get("visible"))
+                            .and_then(|visible| visible.as_bool())
+                            .unwrap_or(false);
+                        count == 0 || !visible
+                    }
+                    Err(_) => false,
+                }
             }).await
         }
         "url_contains" => {
             poll_until(deadline, poll_interval, || async {
-                match eval_string(page, "window.location.href").await {
-                    Some(url) => url.contains(value),
-                    None => false,
-                }
+                inspection::target_url(page, state)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("url").and_then(|url| url.as_str()).map(str::to_string))
+                    .map(|url| url.contains(value))
+                    .unwrap_or(false)
             }).await
         }
         "text_visible" => {
             poll_until(deadline, poll_interval, || async {
-                eval_bool(page, &format!(
-                    r#"(document.body?.innerText || "").includes({text})"#,
-                    text = js_string(value)
-                )).await
+                inspection::text_query(page, state, value, true)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("found").and_then(|found| found.as_bool()))
+                    .unwrap_or(false)
             }).await
         }
         "text_hidden" => {
             poll_until(deadline, poll_interval, || async {
-                eval_bool(page, &format!(
-                    r#"!(document.body?.innerText || "").includes({text})"#,
-                    text = js_string(value)
-                )).await
+                !inspection::text_query(page, state, value, true)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("found").and_then(|found| found.as_bool()))
+                    .unwrap_or(false)
             }).await
         }
         "network_idle" => {
@@ -124,10 +141,11 @@ pub async fn handle_wait_for(
             let (op, target) = parse_threshold(threshold);
             let selector_for_count = value;
             poll_until(deadline, poll_interval, || async {
-                let count = eval_u64(page, &format!(
-                    r#"document.querySelectorAll({sel}).length"#,
-                    sel = js_string(selector_for_count)
-                )).await.unwrap_or(0);
+                let count = inspection::selector_query(page, state, selector_for_count, true)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("count").and_then(|count| count.as_u64()))
+                    .unwrap_or(0);
                 compare_threshold(count, &op, target)
             }).await
         }
@@ -136,10 +154,11 @@ pub async fn handle_wait_for(
             let mut prev_hash: Option<u64> = None;
             let start_loop = Instant::now();
             loop {
-                let html = eval_string(page, &format!(
-                    r#"(document.querySelector({sel})?.innerHTML ?? "")"#,
-                    sel = js_string(value)
-                )).await.unwrap_or_default();
+                let html = inspection::region_signature(page, state, value)
+                    .await
+                    .ok()
+                    .and_then(|result| result.get("html").and_then(|html| html.as_str()).map(str::to_string))
+                    .unwrap_or_default();
                 let mut hasher = DefaultHasher::new();
                 html.hash(&mut hasher);
                 let h = hasher.finish();
@@ -187,31 +206,8 @@ where
     }
 }
 
-/// Evaluate a JS expression that returns a boolean.
-async fn eval_bool(page: &Page, expr: &str) -> bool {
-    match page.evaluate_expression(expr).await {
-        Ok(val) => val.into_value::<bool>().unwrap_or(false),
-        Err(_) => false,
-    }
-}
-
-/// Evaluate a JS expression that returns a string.
-async fn eval_string(page: &Page, expr: &str) -> Option<String> {
-    match page.evaluate_expression(expr).await {
-        Ok(val) => val.into_value::<String>().ok(),
-        Err(_) => None,
-    }
-}
-
-/// Evaluate a JS expression that returns a u64.
-async fn eval_u64(page: &Page, expr: &str) -> Option<u64> {
-    match page.evaluate_expression(expr).await {
-        Ok(val) => val.into_value::<u64>().ok(),
-        Err(_) => None,
-    }
-}
-
 /// Escape a string for embedding as a JS string literal.
+#[cfg(test)]
 fn js_string(s: &str) -> String {
     let escaped = s
         .replace('\\', "\\\\")

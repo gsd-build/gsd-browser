@@ -1,6 +1,7 @@
 pub mod chrome;
 pub mod config;
 pub mod ipc;
+pub mod session;
 pub mod types;
 
 use serde::{Deserialize, Serialize};
@@ -116,6 +117,13 @@ pub fn sanitize_filename(name: &str) -> Result<&str, String> {
     Ok(name)
 }
 
+pub fn validate_session_name(session: Option<&str>) -> Result<Option<&str>, String> {
+    match session {
+        Some(name) => Ok(Some(sanitize_filename(name)?)),
+        None => Ok(None),
+    }
+}
+
 // ── Paths ──
 
 /// Returns the directory for gsd-browser state files (~/.gsd-browser)
@@ -137,12 +145,38 @@ pub fn lock_path() -> std::path::PathBuf {
     state_dir().join("daemon.lock")
 }
 
+const MAX_UNIX_SOCKET_PATH_LEN: usize = 100;
+
+fn stable_socket_hash(input: &str) -> String {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in input.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    format!("{hash:016x}")
+}
+
+fn shortened_socket_path_for(session: Option<&str>) -> std::path::PathBuf {
+    let session_key = session.unwrap_or("default");
+    let identity = format!("{}::{session_key}", state_dir().display());
+    std::env::temp_dir()
+        .join("gsd-browser-sockets")
+        .join(format!("{}.sock", stable_socket_hash(&identity)))
+}
+
 /// Session-aware socket path. When session is Some, uses
-/// `~/.gsd-browser/sessions/<name>/daemon.sock`.
+/// `~/.gsd-browser/sessions/<name>/daemon.sock` when it fits within the
+/// platform socket-path limit, otherwise a stable shortened temp path.
 pub fn socket_path_for(session: Option<&str>) -> std::path::PathBuf {
-    match session {
+    let candidate = match session {
         Some(name) => state_dir().join("sessions").join(name).join("daemon.sock"),
         None => socket_path(),
+    };
+
+    if candidate.display().to_string().len() >= MAX_UNIX_SOCKET_PATH_LEN {
+        shortened_socket_path_for(session)
+    } else {
+        candidate
     }
 }
 

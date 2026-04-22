@@ -11,6 +11,7 @@ use super::interaction::{
 };
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
+use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
@@ -233,7 +234,11 @@ pub async fn handle_analyze_form(page: &Page, params: &Value) -> Result<Value, S
 /// 4-level priority (label → name → placeholder → aria-label).
 /// Phase 2: Rust dispatches to existing interaction handlers per field type.
 /// Phase 3: If submit=true, click the form's submit button.
-pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_fill_form(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let values = params
         .get("values")
         .ok_or_else(|| "missing required parameter: values".to_string())?;
@@ -415,7 +420,7 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
             "select" | "select-one" | "select-multiple" => {
                 let option_str = value.as_str().unwrap_or("");
                 let p = json!({ "selector": selector, "option": option_str });
-                handle_select_option(page, &p).await
+                handle_select_option(page, state, &p).await
             }
             "checkbox" | "radio" => {
                 let checked = match value {
@@ -424,7 +429,7 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
                     _ => true,
                 };
                 let p = json!({ "selector": selector, "checked": checked });
-                handle_set_checked(page, &p).await
+                handle_set_checked(page, state, &p).await
             }
             _ => {
                 // Text-like input: text, email, password, number, tel, url, textarea, etc.
@@ -433,7 +438,7 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
                     other => other.to_string(),
                 };
                 let p = json!({ "selector": selector, "text": text_str });
-                handle_type_text(page, &p).await
+                handle_type_text(page, state, &p).await
             }
         };
 
@@ -448,7 +453,7 @@ pub async fn handle_fill_form(page: &Page, params: &Value) -> Result<Value, Stri
         match &submit_selector {
             Some(sel) => {
                 let p = json!({ "selector": sel });
-                match handle_click(page, &p).await {
+                match handle_click(page, state, &p).await {
                     Ok(_) => true,
                     Err(e) => {
                         fill_errors.push(format!("submit: {e}"));

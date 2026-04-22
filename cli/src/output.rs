@@ -264,8 +264,12 @@ pub fn format_text_interaction(result: &Value) -> String {
     if let Some(key) = result.get("pressed").and_then(|v| v.as_str()) {
         lines.push(format!("Pressed: {key}"));
     }
-    if let Some(sel) = result.get("hovered").and_then(|v| v.as_str()) {
-        lines.push(format!("Hovered: {sel}"));
+    if let Some(hovered) = result.get("hovered") {
+        if let Some(sel) = hovered.as_str() {
+            lines.push(format!("Hovered: {sel}"));
+        } else if let Some(sel) = hovered.get("selector").and_then(|v| v.as_str()) {
+            lines.push(format!("Hovered: {sel}"));
+        }
     }
     if let Some(selected) = result.get("selected") {
         let sel = selected
@@ -1216,6 +1220,30 @@ pub fn format_text_act(result: &Value) -> String {
 /// Format session-summary result — structured diagnostic snapshot.
 pub fn format_text_session_summary(result: &Value) -> String {
     let mut lines = Vec::new();
+
+    if let Some(session) = result.get("session") {
+        let status = session
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        lines.push(format!("Session: {status}"));
+        if let Some(name) = session.get("name").and_then(|v| v.as_str()) {
+            if !name.is_empty() {
+                lines.push(format!("  Name: {name}"));
+            }
+        }
+        if let Some(reason) = session.get("reason").and_then(|v| v.as_str()) {
+            if !reason.is_empty() {
+                lines.push(format!("  Reason: {reason}"));
+            }
+        }
+        if let Some(pid) = session.get("daemonPid").and_then(|v| v.as_i64()) {
+            lines.push(format!("  Daemon PID: {pid}"));
+        }
+        if let Some(pid) = session.get("browserPid").and_then(|v| v.as_u64()) {
+            lines.push(format!("  Browser PID: {pid}"));
+        }
+    }
 
     // Active page
     if let Some(page) = result.get("activePage") {

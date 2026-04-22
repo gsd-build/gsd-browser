@@ -1,8 +1,5 @@
 //! Session diagnostics: session-summary and debug-bundle handlers.
 //!
-//! `session_summary` is pure Rust aggregation — no JS evaluation, just
-//! DaemonState + DaemonLogs summarization.
-//!
 //! `debug_bundle` collects all diagnostic artifacts into a timestamped directory.
 
 use crate::daemon::logs::DaemonLogs;
@@ -10,24 +7,20 @@ use crate::daemon::state::DaemonState;
 use base64::Engine as _;
 use chromiumoxide::Page;
 use chrono::Local;
+use gsd_browser_common::session::{
+    load_session_manifest, manifest_path_for, now_epoch_secs, save_session_manifest,
+    SessionHealthStatus, SessionManifest,
+};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;
+use std::process;
 use tracing::{debug, warn};
 
 /// Maximum timeline entries cap (must match state.rs MAX_TIMELINE_ENTRIES).
 const MAX_TIMELINE_ENTRIES: usize = 60;
 
-/// Handle `session_summary` — pure Rust aggregation of timeline, logs, and page state.
-///
-/// Returns structured JSON with:
-/// - action counts (total, by status, wait count, assert count)
-/// - console error count
-/// - failed network request count
-/// - dialog count
-/// - active page info (url, title)
-/// - bounded-history caveat flag
-pub fn handle_session_summary(logs: &DaemonLogs, state: &DaemonState) -> Result<Value, String> {
+fn build_summary_aggregation(logs: &DaemonLogs, state: &DaemonState) -> Value {
     debug!("handle_session_summary: aggregating state");
 
     // Timeline aggregation
@@ -99,7 +92,7 @@ pub fn handle_session_summary(logs: &DaemonLogs, state: &DaemonState) -> Result<
         .clone()
         .unwrap_or_default();
 
-    Ok(json!({
+    json!({
         "actions": {
             "total": total_actions,
             "ok": status_ok,
@@ -132,7 +125,213 @@ pub fn handle_session_summary(logs: &DaemonLogs, state: &DaemonState) -> Result<
         } else {
             String::new()
         },
+    })
+}
+
+async fn probe_active_page(page: &Page) -> (bool, String, String) {
+    let url = match page.url().await {
+        Ok(Some(url)) => url,
+        Ok(None) => String::new(),
+        Err(err) => {
+            return (
+                false,
+                String::new(),
+                format!("page URL probe failed: {err}"),
+            );
+        }
+    };
+
+    let title = page
+        .evaluate_expression("document.title")
+        .await
+        .ok()
+        .and_then(|value| value.into_value::<String>().ok())
+        .unwrap_or_default();
+
+    (true, url, title)
+}
+
+fn current_active_page(state: &DaemonState) -> (u64, usize, String, String) {
+    let pages = state.pages.lock().unwrap();
+    let active = pages.entries.iter().find(|entry| entry.id == pages.active_page_id);
+    match active {
+        Some(entry) => (
+            entry.id,
+            pages.entries.len(),
+            entry.url.clone(),
+            entry.title.clone(),
+        ),
+        None => (0, pages.entries.len(), String::new(), String::new()),
+    }
+}
+
+fn set_active_page_metadata(state: &DaemonState, id: u64, url: &str, title: &str) {
+    let mut pages = state.pages.lock().unwrap();
+    if id != 0 {
+        pages.update_metadata(id, title.to_string(), url.to_string());
+    }
+}
+
+fn health_status_from_browser_probe(
+    browser_connected: bool,
+    active_url: &str,
+    reason: &str,
+) -> (SessionHealthStatus, String) {
+    if !browser_connected {
+        return (SessionHealthStatus::Degraded, reason.to_string());
+    }
+    if active_url.is_empty() {
+        return (
+            SessionHealthStatus::Degraded,
+            "browser is connected but active page URL is unavailable".to_string(),
+        );
+    }
+    (SessionHealthStatus::Healthy, String::new())
+}
+
+fn build_and_persist_manifest(
+    state: &DaemonState,
+    health: SessionHealthStatus,
+    reason: String,
+    active_page_id: u64,
+    active_page_url: String,
+    active_page_title: String,
+) -> Result<SessionManifest, String> {
+    let now = now_epoch_secs();
+    let runtime = &state.session;
+    let mut manifest = load_session_manifest(runtime.session_name.as_deref())?.unwrap_or_default();
+    manifest.manifest_version = 1;
+    manifest.session_name = runtime.session_name.clone();
+    manifest.daemon_pid = Some(process::id() as i32);
+    manifest.browser_pid = runtime.browser_pid;
+    manifest.socket_path = runtime.socket_path.clone();
+    manifest.daemon_started_at = manifest.daemon_started_at.or(Some(now));
+    manifest.browser_started_at = manifest.browser_started_at.or(Some(now));
+    manifest.daemon_version = env!("CARGO_PKG_VERSION").to_string();
+    manifest.launch_mode = runtime.launch_mode.clone();
+    manifest.cdp_url = runtime.cdp_url.clone();
+    manifest.websocket_url = runtime.websocket_url.clone();
+    manifest.browser_user_data_dir = runtime.browser_user_data_dir.clone();
+    manifest.health = health;
+    manifest.health_reason = reason;
+    manifest.last_heartbeat_at = Some(now);
+    manifest.last_updated_at = Some(now);
+    manifest.active_page_id = if active_page_id == 0 {
+        None
+    } else {
+        Some(active_page_id)
+    };
+    manifest.active_page_url = active_page_url;
+    manifest.active_page_title = active_page_title;
+    save_session_manifest(runtime.session_name.as_deref(), &manifest)?;
+    Ok(manifest)
+}
+
+fn session_identity_json(
+    state: &DaemonState,
+    manifest: &SessionManifest,
+) -> Value {
+    let browser_connected = matches!(
+        manifest.health,
+        SessionHealthStatus::Healthy | SessionHealthStatus::Recovering
+    );
+    json!({
+        "name": manifest.session_name,
+        "status": manifest.health.as_str(),
+        "reason": manifest.health_reason,
+        "daemonPid": manifest.daemon_pid,
+        "browserPid": manifest.browser_pid,
+        "socketPath": manifest.socket_path,
+        "manifestPath": manifest_path_for(state.session.session_name.as_deref()).to_string_lossy().to_string(),
+        "launchMode": manifest.launch_mode,
+        "cdpUrl": manifest.cdp_url,
+        "websocketUrl": manifest.websocket_url,
+        "browserUserDataDir": manifest.browser_user_data_dir,
+        "lastHeartbeatAt": manifest.last_heartbeat_at,
+        "lastUpdatedAt": manifest.last_updated_at,
+        "browserConnected": browser_connected,
+        "daemonAlive": true,
+        "socketConnected": true,
+    })
+}
+
+pub async fn sync_session_manifest(
+    page: &Page,
+    state: &DaemonState,
+    health_override: Option<SessionHealthStatus>,
+    reason_override: Option<String>,
+) -> Result<SessionManifest, String> {
+    let (active_page_id, _page_count, registry_url, registry_title) = current_active_page(state);
+    let (browser_connected, live_url, probe_reason) = probe_active_page(page).await;
+    let live_title = page
+        .evaluate_expression("document.title")
+        .await
+        .ok()
+        .and_then(|value| value.into_value::<String>().ok())
+        .unwrap_or_else(|| registry_title.clone());
+    let final_url = if live_url.is_empty() {
+        registry_url
+    } else {
+        live_url
+    };
+    let final_title = if live_title.is_empty() {
+        registry_title
+    } else {
+        live_title
+    };
+    set_active_page_metadata(state, active_page_id, &final_url, &final_title);
+    let (derived_health, derived_reason) =
+        health_status_from_browser_probe(browser_connected, &final_url, &probe_reason);
+    build_and_persist_manifest(
+        state,
+        health_override.unwrap_or(derived_health),
+        reason_override.unwrap_or(derived_reason),
+        active_page_id,
+        final_url,
+        final_title,
+    )
+}
+
+pub async fn mark_session_stopped(state: &DaemonState, reason: &str) -> Result<(), String> {
+    let (active_page_id, _page_count, active_page_url, active_page_title) = current_active_page(state);
+    let _ = build_and_persist_manifest(
+        state,
+        SessionHealthStatus::Stopped,
+        reason.to_string(),
+        active_page_id,
+        active_page_url,
+        active_page_title,
+    )?;
+    Ok(())
+}
+
+pub async fn handle_health(page: &Page, state: &DaemonState) -> Result<Value, String> {
+    let manifest = sync_session_manifest(page, state, None, None).await?;
+    Ok(json!({
+        "session": session_identity_json(state, &manifest),
+        "activePage": {
+            "id": manifest.active_page_id.unwrap_or(0),
+            "url": manifest.active_page_url,
+            "title": manifest.active_page_title,
+        },
     }))
+}
+
+/// Handle `session_summary` — manifest-backed session health plus daemon logs/state.
+pub async fn handle_session_summary(
+    page: &Page,
+    logs: &DaemonLogs,
+    state: &DaemonState,
+) -> Result<Value, String> {
+    let mut summary = build_summary_aggregation(logs, state);
+    let manifest = sync_session_manifest(page, state, None, None).await?;
+    summary["session"] = session_identity_json(state, &manifest);
+    summary["activePage"] = json!({
+        "id": manifest.active_page_id.unwrap_or(0),
+        "url": manifest.active_page_url,
+        "title": manifest.active_page_title,
+    });
+    Ok(summary)
 }
 
 /// Handle `debug_bundle` — collects all diagnostic artifacts into a timestamped directory.
@@ -248,7 +447,7 @@ pub async fn handle_debug_bundle(
     }
 
     // 6. Session summary
-    match handle_session_summary(logs, state) {
+    match handle_session_summary(page, logs, state).await {
         Ok(summary) => {
             let json_str =
                 serde_json::to_string_pretty(&summary).unwrap_or_else(|_| "{}".to_string());
@@ -324,7 +523,7 @@ mod tests {
     fn session_summary_empty_state() {
         let logs = DaemonLogs::new();
         let state = DaemonState::new();
-        let result = handle_session_summary(&logs, &state).unwrap();
+        let result = build_summary_aggregation(&logs, &state);
         assert_eq!(result["actions"]["total"], 0);
         assert_eq!(result["console"]["total"], 0);
         assert_eq!(result["network"]["total"], 0);
@@ -363,7 +562,7 @@ mod tests {
             url: String::new(),
         });
 
-        let result = handle_session_summary(&logs, &state).unwrap();
+        let result = build_summary_aggregation(&logs, &state);
         assert_eq!(result["actions"]["total"], 3);
         assert_eq!(result["actions"]["ok"], 2);
         assert_eq!(result["actions"]["error"], 1);
@@ -388,7 +587,7 @@ mod tests {
             }
         }
 
-        let result = handle_session_summary(&logs, &state).unwrap();
+        let result = build_summary_aggregation(&logs, &state);
         assert_eq!(result["boundedHistory"], true);
         assert!(result["boundedHistoryCaveat"]
             .as_str()
