@@ -291,28 +291,38 @@ TOML
 verify() {
   info "Verifying installation..."
 
+  local bin=""
   if ! command -v gsd-browser >/dev/null 2>&1; then
     # Try the direct path
     if [ -x "$BIN_DIR/gsd-browser" ]; then
-      local result
-      result=$("$BIN_DIR/gsd-browser" daemon health 2>&1) && {
-        ok "Daemon healthy (using direct path)"
-        "$BIN_DIR/gsd-browser" daemon stop >/dev/null 2>&1 || true
-        return
-      }
+      bin="$BIN_DIR/gsd-browser"
+    else
+      warn "gsd-browser not in PATH yet — restart your shell or run: export PATH=\"$BIN_DIR:\$PATH\""
+      return
     fi
-    warn "gsd-browser not in PATH yet — restart your shell or run: export PATH=\"$BIN_DIR:\$PATH\""
-    return
+  else
+    bin="gsd-browser"
   fi
 
-  local result
-  result=$(gsd-browser daemon health 2>&1) && {
-    ok "Daemon healthy"
-    gsd-browser daemon stop >/dev/null 2>&1 || true
-  } || {
-    warn "Daemon test failed — this is normal if Chrome is not in the default path"
-    warn "Set browser.path in ~/.gsd-browser/config.toml"
-  }
+  "$bin" daemon stop >/dev/null 2>&1 || true
+
+  if "$bin" daemon start >/dev/null 2>&1; then
+    local health_output
+    health_output=$("$bin" daemon health 2>&1 || true)
+    if printf '%s\n' "$health_output" | grep -q '^Daemon: healthy$'; then
+      if [ "$bin" = "$BIN_DIR/gsd-browser" ]; then
+        ok "Daemon healthy (using direct path)"
+      else
+        ok "Daemon healthy"
+      fi
+      "$bin" daemon stop >/dev/null 2>&1 || true
+      return
+    fi
+  fi
+
+  "$bin" daemon stop >/dev/null 2>&1 || true
+  warn "Daemon test failed — this is normal if Chrome is not in the default path"
+  warn "Set browser.path in ~/.gsd-browser/config.toml"
 }
 
 SKILL_REPO_BASE="https://raw.githubusercontent.com/$REPO/main/gsd-browser-skill"
