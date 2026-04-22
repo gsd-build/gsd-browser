@@ -314,6 +314,6 @@ gsd-browser daemon stop
 gsd-browser daemon start
 ```
 
-The daemon auto-starts on first command. `daemon stop` is idempotent — safe to call even if the process is already dead.
+The daemon auto-starts on browser commands. `daemon health` is read-only and does not start a session. `daemon stop` is idempotent — safe to call even if the process is already dead.
 
 </daemon_management>

@@ -5,7 +5,9 @@
 //! dispatch CDP → settle → capture compact page state → return JSON.
 
 use crate::daemon::capture::capture_compact_page_state;
+use crate::daemon::inspection;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
+use crate::daemon::state::DaemonState;
 use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::layout::Point;
@@ -41,56 +43,103 @@ async fn settle_and_capture(page: &Page) -> (Value, Value) {
     )
 }
 
+fn selector_action_error(result: &Value, fallback: &str) -> String {
+    result
+        .get("error")
+        .and_then(|value| value.as_str())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn selector_action_meta(selector: &str, result: &Value) -> Value {
+    let target = result.get("target").cloned().unwrap_or(Value::Null);
+    json!({
+        "selector": selector,
+        "frameLabel": target.get("frameLabel").cloned().unwrap_or(Value::Null),
+        "frameUrl": target.get("frameUrl").cloned().unwrap_or(Value::Null),
+        "tag": target.get("tag").cloned().unwrap_or(Value::Null),
+        "role": target.get("role").cloned().unwrap_or(Value::Null),
+        "name": target.get("name").cloned().unwrap_or(Value::Null),
+    })
+}
+
 // ── Click ──
 
 /// Handle `click` command.
 /// Params: { selector?: string, x?: f64, y?: f64 }
-pub async fn handle_click(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_click(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params.get("selector").and_then(|v| v.as_str());
     let x = params.get("x").and_then(|v| v.as_f64());
     let y = params.get("y").and_then(|v| v.as_f64());
 
     match (selector, x, y) {
-        (Some(sel), _, _) => click_selector(page, sel).await,
+        (Some(sel), _, _) => click_selector(page, state, sel).await,
         (None, Some(cx), Some(cy)) => click_coordinates(page, cx, cy).await,
         _ => Err("click requires either 'selector' or both 'x' and 'y' coordinates".to_string()),
     }
 }
 
-async fn click_selector(page: &Page, selector: &str) -> Result<Value, String> {
+async fn click_selector(page: &Page, state: &DaemonState, selector: &str) -> Result<Value, String> {
     debug!("click: selector={selector}");
 
-    // Try native element click first, fall back to JS click
-    let click_result = timeout(ELEMENT_TIMEOUT, async {
-        match page.find_element(selector).await {
-            Ok(element) => match element.click().await {
-                Ok(_) => Ok(()),
-                Err(e) => {
-                    debug!("click: native click failed ({e}), falling back to JS");
-                    // JS fallback
-                    let js = format!(
-                        "(() => {{ const el = document.querySelector({sel}); if (!el) throw new Error('element not found'); el.click(); return true; }})()",
-                        sel = serde_json::to_string(selector).unwrap()
-                    );
-                    page.evaluate_expression(&js)
-                        .await
-                        .map_err(|e2| format!("JS click fallback failed: {e2}"))?;
-                    Ok(())
-                }
-            },
-            Err(e) => Err(format!("element not found: {selector} ({e})")),
-        }
-    })
-    .await
-    .map_err(|_| format!("click timed out after 10s for: {selector}"))?;
+    let resolved = inspection::resolve_selector_target(page, state, selector, true).await?;
+    if !resolved
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(selector_action_error(
+            &resolved,
+            &format!("element not found: {selector}"),
+        ));
+    }
 
-    click_result?;
+    let center = resolved.get("center").cloned().unwrap_or_else(|| json!({}));
+    let x = center
+        .get("x")
+        .and_then(|value| value.as_f64())
+        .ok_or_else(|| format!("click target has no x coordinate: {selector}"))?;
+    let y = center
+        .get("y")
+        .and_then(|value| value.as_f64())
+        .ok_or_else(|| format!("click target has no y coordinate: {selector}"))?;
+
+    if let Err(err) = timeout(CDP_TIMEOUT, page.click(Point::new(x, y)))
+        .await
+        .map_err(|_| format!("click timed out at ({x}, {y})"))?
+    {
+        debug!("click: coordinate click failed ({err}), falling back to JS action");
+        let fallback = inspection::perform_selector_action(
+            page,
+            state,
+            selector,
+            "click",
+            &json!({}),
+            true,
+        )
+        .await?;
+        if !fallback
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            return Err(selector_action_error(
+                &fallback,
+                &format!("click failed for {selector}"),
+            ));
+        }
+    }
 
     let (state, settle) = settle_and_capture(page).await;
     Ok(json!({
         "state": state,
         "settle": settle,
-        "clicked": { "selector": selector },
+        "clicked": selector_action_meta(selector, &resolved),
+        "boundaries": resolved.get("boundaries").cloned().unwrap_or(json!([])),
     }))
 }
 
@@ -114,7 +163,11 @@ async fn click_coordinates(page: &Page, x: f64, y: f64) -> Result<Value, String>
 
 /// Handle `type` command (called type_text to avoid Rust keyword).
 /// Params: { selector: string, text: string, slowly?: bool, clear_first?: bool, submit?: bool }
-pub async fn handle_type_text(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_type_text(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -143,66 +196,30 @@ pub async fn handle_type_text(page: &Page, params: &Value) -> Result<Value, Stri
 
     let text_len = text.len();
 
-    // Find element and click to focus
-    let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-        .await
-        .map_err(|_| format!("type: timed out finding element: {selector}"))?
-        .map_err(|e| format!("element not found: {selector} ({e})"))?;
-
-    timeout(ELEMENT_TIMEOUT, element.click())
-        .await
-        .map_err(|_| "type: timed out clicking element to focus".to_string())?
-        .map_err(|e| format!("type: click to focus failed: {e}"))?;
-
-    // Clear if requested
-    if clear_first {
-        let clear_js = format!(
-            "(() => {{ const el = document.querySelector({sel}); if(el) {{ el.value = ''; el.dispatchEvent(new Event('input', {{bubbles:true}})); }} }})()",
-            sel = serde_json::to_string(selector).unwrap()
-        );
-        timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&clear_js))
-            .await
-            .map_err(|_| "type: timed out clearing field".to_string())?
-            .map_err(|e| format!("type: clear failed: {e}"))?;
+    let action_result = inspection::perform_selector_action(
+        page,
+        state,
+        selector,
+        "type",
+        &json!({
+            "text": text,
+            "slowly": slowly,
+            "clearFirst": clear_first,
+            "submit": submit,
+        }),
+        true,
+    )
+    .await?;
+    if !action_result
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(selector_action_error(
+            &action_result,
+            &format!("type failed for {selector}"),
+        ));
     }
-
-    if slowly {
-        // Character-by-character via type_str (dispatches key events)
-        let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-            .await
-            .map_err(|_| format!("type: timed out re-finding element: {selector}"))?
-            .map_err(|e| format!("element not found: {selector} ({e})"))?;
-        timeout(Duration::from_secs(30), element.type_str(text))
-            .await
-            .map_err(|_| "type: timed out typing slowly".to_string())?
-            .map_err(|e| format!("type: slow typing failed: {e}"))?;
-    } else {
-        // Atomic fill via JS
-        let fill_js = format!(
-            "(() => {{ const el = document.querySelector({sel}); if(!el) throw new Error('element not found'); el.value = {val}; el.dispatchEvent(new Event('input', {{bubbles:true}})); el.dispatchEvent(new Event('change', {{bubbles:true}})); return true; }})()",
-            sel = serde_json::to_string(selector).unwrap(),
-            val = serde_json::to_string(text).unwrap()
-        );
-        timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&fill_js))
-            .await
-            .map_err(|_| "type: timed out filling field".to_string())?
-            .map_err(|e| format!("type: atomic fill failed: {e}"))?;
-    }
-
-    let submitted = if submit {
-        // Re-find element and press Enter
-        let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-            .await
-            .map_err(|_| format!("type: timed out re-finding element for submit: {selector}"))?
-            .map_err(|e| format!("element not found for submit: {selector} ({e})"))?;
-        timeout(ELEMENT_TIMEOUT, element.press_key("Enter"))
-            .await
-            .map_err(|_| "type: timed out pressing Enter".to_string())?
-            .map_err(|e| format!("type: press Enter failed: {e}"))?;
-        true
-    } else {
-        false
-    };
 
     let (state, settle) = settle_and_capture(page).await;
     Ok(json!({
@@ -212,8 +229,11 @@ pub async fn handle_type_text(page: &Page, params: &Value) -> Result<Value, Stri
             "selector": selector,
             "text_length": text_len,
             "slowly": slowly,
-            "submitted": submitted,
+            "submitted": submit,
+            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
         },
+        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
     }))
 }
 
@@ -308,7 +328,11 @@ async fn press_combo(page: &Page, combo: &str) -> Result<(), String> {
 
 /// Handle `hover` command — scroll element into view and dispatch mouseMoved.
 /// Params: { selector: string }
-pub async fn handle_hover(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_hover(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -316,33 +340,60 @@ pub async fn handle_hover(page: &Page, params: &Value) -> Result<Value, String> 
 
     debug!("hover: selector={selector}");
 
-    let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-        .await
-        .map_err(|_| format!("hover timed out finding element: {selector}"))?
-        .map_err(|e| format!("element not found: {selector} ({e})"))?;
+    let resolved = inspection::resolve_selector_target(page, state, selector, true).await?;
+    if !resolved
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(selector_action_error(
+            &resolved,
+            &format!("element not found: {selector}"),
+        ));
+    }
 
-    // scroll_into_view + hover (which dispatches mouseMoved internally)
-    timeout(ELEMENT_TIMEOUT, element.scroll_into_view())
-        .await
-        .map_err(|_| "hover: timed out scrolling element into view".to_string())?
-        .map_err(|e| format!("hover: scroll into view failed: {e}"))?;
+    let center = resolved.get("center").cloned().unwrap_or_else(|| json!({}));
+    let x = center
+        .get("x")
+        .and_then(|value| value.as_f64())
+        .ok_or_else(|| format!("hover target has no x coordinate: {selector}"))?;
+    let y = center
+        .get("y")
+        .and_then(|value| value.as_f64())
+        .ok_or_else(|| format!("hover target has no y coordinate: {selector}"))?;
 
-    // Re-find element after scroll
-    let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-        .await
-        .map_err(|_| format!("hover: timed out re-finding element: {selector}"))?
-        .map_err(|e| format!("element not found after scroll: {selector} ({e})"))?;
-
-    timeout(ELEMENT_TIMEOUT, element.hover())
+    if let Err(err) = timeout(CDP_TIMEOUT, page.move_mouse(Point::new(x, y)))
         .await
         .map_err(|_| format!("hover timed out for: {selector}"))?
-        .map_err(|e| format!("hover failed for {selector}: {e}"))?;
+    {
+        debug!("hover: coordinate hover failed ({err}), falling back to JS action");
+        let fallback = inspection::perform_selector_action(
+            page,
+            state,
+            selector,
+            "hover",
+            &json!({}),
+            true,
+        )
+        .await?;
+        if !fallback
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            return Err(selector_action_error(
+                &fallback,
+                &format!("hover failed for {selector}"),
+            ));
+        }
+    }
 
     let (state, settle) = settle_and_capture(page).await;
     Ok(json!({
         "state": state,
         "settle": settle,
-        "hovered": selector,
+        "hovered": selector_action_meta(selector, &resolved),
+        "boundaries": resolved.get("boundaries").cloned().unwrap_or(json!([])),
     }))
 }
 
@@ -418,7 +469,11 @@ pub async fn handle_scroll(page: &Page, params: &Value) -> Result<Value, String>
 
 /// Handle `select_option` command — set select element value.
 /// Params: { selector: string, option: string }
-pub async fn handle_select_option(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_select_option(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -430,33 +485,37 @@ pub async fn handle_select_option(page: &Page, params: &Value) -> Result<Value, 
 
     debug!("select_option: selector={selector} option={option}");
 
-    let js = format!(
-        r#"(() => {{
-            const sel = document.querySelector({sel_json});
-            if (!sel) throw new Error('select element not found: ' + {sel_json});
-            if (sel.tagName.toLowerCase() !== 'select') throw new Error('element is not a <select>');
-            const opts = Array.from(sel.options);
-            const match = opts.find(o => o.label === {opt_json} || o.value === {opt_json} || o.textContent.trim() === {opt_json});
-            if (!match) throw new Error('option not found: ' + {opt_json});
-            sel.value = match.value;
-            sel.dispatchEvent(new Event('change', {{bubbles: true}}));
-            sel.dispatchEvent(new Event('input', {{bubbles: true}}));
-            return {{ selected: match.value, label: match.label || match.textContent.trim() }};
-        }})()"#,
-        sel_json = serde_json::to_string(selector).unwrap(),
-        opt_json = serde_json::to_string(option).unwrap()
-    );
-
-    timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&js))
-        .await
-        .map_err(|_| format!("select_option timed out for: {selector}"))?
-        .map_err(|e| format!("select_option failed: {e}"))?;
+    let action_result = inspection::perform_selector_action(
+        page,
+        state,
+        selector,
+        "select_option",
+        &json!({ "option": option }),
+        true,
+    )
+    .await?;
+    if !action_result
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(selector_action_error(
+            &action_result,
+            &format!("select_option failed for {selector}"),
+        ));
+    }
 
     let (state, settle) = settle_and_capture(page).await;
     Ok(json!({
         "state": state,
         "settle": settle,
-        "selected": { "selector": selector, "option": option },
+        "selected": {
+            "selector": selector,
+            "option": option,
+            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+        },
+        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
     }))
 }
 
@@ -464,7 +523,11 @@ pub async fn handle_select_option(page: &Page, params: &Value) -> Result<Value, 
 
 /// Handle `set_checked` command — set checkbox/radio state.
 /// Params: { selector: string, checked: bool }
-pub async fn handle_set_checked(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_set_checked(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -476,29 +539,37 @@ pub async fn handle_set_checked(page: &Page, params: &Value) -> Result<Value, St
 
     debug!("set_checked: selector={selector} checked={checked}");
 
-    let js = format!(
-        r#"(() => {{
-            const el = document.querySelector({sel_json});
-            if (!el) throw new Error('element not found: ' + {sel_json});
-            el.checked = {checked};
-            el.dispatchEvent(new Event('change', {{bubbles: true}}));
-            el.dispatchEvent(new Event('input', {{bubbles: true}}));
-            return true;
-        }})()"#,
-        sel_json = serde_json::to_string(selector).unwrap(),
-        checked = checked,
-    );
-
-    timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&js))
-        .await
-        .map_err(|_| format!("set_checked timed out for: {selector}"))?
-        .map_err(|e| format!("set_checked failed: {e}"))?;
+    let action_result = inspection::perform_selector_action(
+        page,
+        state,
+        selector,
+        "set_checked",
+        &json!({ "checked": checked }),
+        true,
+    )
+    .await?;
+    if !action_result
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        return Err(selector_action_error(
+            &action_result,
+            &format!("set_checked failed for {selector}"),
+        ));
+    }
 
     let (state, settle) = settle_and_capture(page).await;
     Ok(json!({
         "state": state,
         "settle": settle,
-        "checked": { "selector": selector, "value": checked },
+        "checked": {
+            "selector": selector,
+            "value": checked,
+            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+        },
+        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
     }))
 }
 

@@ -199,8 +199,20 @@ impl TraceState {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct SessionRuntime {
+    pub session_name: Option<String>,
+    pub launch_mode: String,
+    pub cdp_url: Option<String>,
+    pub websocket_url: Option<String>,
+    pub browser_pid: Option<u32>,
+    pub browser_user_data_dir: Option<String>,
+    pub socket_path: String,
+}
+
 /// Top-level daemon state shared across all connections.
 pub struct DaemonState {
+    pub session: SessionRuntime,
     pub timeline: Mutex<ActionTimeline>,
     pub refs: Mutex<RefStore>,
     pub diff: Mutex<DiffState>,
@@ -212,8 +224,14 @@ pub struct DaemonState {
 }
 
 impl DaemonState {
+    #[cfg(test)]
     pub fn new() -> Self {
+        Self::new_with_session(SessionRuntime::default())
+    }
+
+    pub fn new_with_session(session: SessionRuntime) -> Self {
         Self {
+            session,
             timeline: Mutex::new(ActionTimeline::new()),
             refs: Mutex::new(RefStore::new()),
             diff: Mutex::new(DiffState::new()),
@@ -361,6 +379,7 @@ mod tests {
     #[test]
     fn daemon_state_construction() {
         let state = DaemonState::new();
+        assert!(state.session.session_name.is_none());
         let timeline = state.timeline.lock().unwrap();
         assert_eq!(timeline.snapshot().len(), 0);
         let pages = state.pages.lock().unwrap();

@@ -1,6 +1,7 @@
 pub mod capture;
 pub mod handlers;
 pub mod helpers;
+pub mod inspection;
 pub mod logs;
 pub mod settle;
 pub mod state;
@@ -12,13 +13,25 @@ use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParam
 use chromiumoxide::Page;
 use futures::StreamExt;
 use gsd_browser_common::{
-    config::Config, ipc, pid_path_for, socket_path_for, state_dir, DaemonRequest, DaemonResponse,
-    ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
+    config::Config,
+    ipc,
+    pid_path_for,
+    socket_path_for,
+    state_dir,
+    validate_session_name,
+    DaemonRequest,
+    DaemonResponse,
+    ERR_INTERNAL,
+    ERR_METHOD_NOT_FOUND,
+};
+use gsd_browser_common::session::{
+    now_epoch_secs, save_session_manifest, session_dir_for, SessionHealthStatus, SessionManifest,
 };
 use logs::DaemonLogs;
 use serde_json::json;
-use state::DaemonState;
+use state::{DaemonState, SessionRuntime};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
 use tokio::net::UnixListener;
@@ -69,6 +82,32 @@ async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
+fn browser_profile_dir(session: Option<&str>) -> PathBuf {
+    session_dir_for(session).join("browser-profile")
+}
+
+fn cleanup_browser_profile_singletons(profile_dir: &Path) {
+    for artifact in ["SingletonLock", "SingletonCookie", "SingletonSocket"] {
+        let path = profile_dir.join(artifact);
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+
+        let result = if metadata.file_type().is_dir() && !metadata.file_type().is_symlink() {
+            fs::remove_dir_all(&path)
+        } else {
+            fs::remove_file(&path)
+        };
+
+        if let Err(err) = result {
+            warn!(
+                "[gsd-browser-daemon] failed to remove browser profile artifact {:?}: {}",
+                path, err
+            );
+        }
+    }
+}
+
 async fn run_daemon(
     browser_path_arg: Option<String>,
     session_arg: Option<String>,
@@ -85,7 +124,8 @@ async fn run_daemon(
     let effective_browser_path = browser_path_arg.or_else(|| config.browser.path.clone());
     let effective_cdp_url = cdp_url_arg.or_else(|| config.browser.cdp_url.clone());
 
-    let session = session_arg.as_deref();
+    let session = validate_session_name(session_arg.as_deref())
+        .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
 
     // Ensure state directory exists
     let state = state_dir();
@@ -138,6 +178,30 @@ async fn run_daemon(
         pid_file_path
     );
 
+    let launch_mode = if effective_cdp_url.is_some() {
+        "attached".to_string()
+    } else {
+        "launched".to_string()
+    };
+    let start_ts = now_epoch_secs();
+    let starting_manifest = SessionManifest {
+        manifest_version: 1,
+        session_name: session.map(str::to_string),
+        daemon_pid: Some(process::id() as i32),
+        socket_path: sock_path.to_string_lossy().to_string(),
+        daemon_started_at: Some(start_ts),
+        browser_started_at: Some(start_ts),
+        daemon_version: env!("CARGO_PKG_VERSION").to_string(),
+        launch_mode: launch_mode.clone(),
+        cdp_url: effective_cdp_url.clone(),
+        health: SessionHealthStatus::Starting,
+        health_reason: "daemon starting".to_string(),
+        last_updated_at: Some(start_ts),
+        ..SessionManifest::default()
+    };
+    save_session_manifest(session, &starting_manifest)
+        .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+
     let (mut browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
         // Connect to an already-running Chrome instance via CDP
         info!(
@@ -154,7 +218,9 @@ async fn run_daemon(
             let version_url = format!("{}/json/version", cdp_url.trim_end_matches('/'));
             let body: serde_json::Value = reqwest::get(&version_url)
                 .await
-                .map_err(|e| format!("failed to reach Chrome debug endpoint at {version_url}: {e}"))?
+                .map_err(|e| {
+                    format!("failed to reach Chrome debug endpoint at {version_url}: {e}")
+                })?
                 .json()
                 .await
                 .map_err(|e| format!("invalid JSON from {version_url}: {e}"))?;
@@ -165,33 +231,31 @@ async fn run_daemon(
         };
 
         info!("[gsd-browser-daemon] resolved WebSocket URL: {}", ws_url);
-        let result = Browser::connect(&ws_url).await
-            .map_err(|e| -> Box<dyn std::error::Error> {
-                format!("failed to connect to Chrome CDP at {ws_url}: {e}").into()
-            })?;
+        let result =
+            Browser::connect(&ws_url)
+                .await
+                .map_err(|e| -> Box<dyn std::error::Error> {
+                    format!("failed to connect to Chrome CDP at {ws_url}: {e}").into()
+                })?;
         info!("[gsd-browser-daemon] connected to existing Chrome successfully");
         result
     } else {
         // Launch a new Chrome instance
-        let chrome_path = gsd_browser_common::chrome::find_chrome(effective_browser_path.as_deref())
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+        let chrome_path =
+            gsd_browser_common::chrome::find_chrome(effective_browser_path.as_deref())
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         info!(
             "[gsd-browser-daemon] launching Chrome from {:?}",
             chrome_path
         );
 
-        // Stale SingletonLock from a crashed Chromiumoxide process blocks Chrome launch.
-        // Clean it up proactively before launch.
-        let runner_dir = std::env::temp_dir().join("chromiumoxide-runner");
-        let lock = runner_dir.join("SingletonLock");
-        if lock.exists() {
-            warn!("[gsd-browser-daemon] removing stale SingletonLock at {:?}", lock);
-            let _ = fs::remove_file(&lock);
-            let _ = fs::remove_dir_all(&runner_dir);
-        }
+        let profile_dir = browser_profile_dir(session);
+        fs::create_dir_all(&profile_dir)?;
+        cleanup_browser_profile_singletons(&profile_dir);
 
         let mut builder = BrowserConfig::builder()
             .chrome_executable(chrome_path)
+            .user_data_dir(&profile_dir)
             .window_size(1920, 1080)
             .arg("--window-size=1920,1080");
         if !config.browser.headless {
@@ -209,8 +273,8 @@ async fn run_daemon(
     // Handler must be polled continuously — spawn it
     let handler_task = tokio::spawn(async move {
         while let Some(event) = handler.next().await {
-            if event.is_err() {
-                break;
+            if let Err(err) = event {
+                error!("[gsd-browser-daemon] browser handler error: {err}");
             }
         }
     });
@@ -244,7 +308,22 @@ async fn run_daemon(
 
     // Create log buffers and spawn event listeners
     let daemon_logs = Arc::new(DaemonLogs::new());
-    let daemon_state = Arc::new(DaemonState::new());
+    let browser_pid = browser
+        .get_mut_child()
+        .and_then(|child| child.as_mut_inner().id());
+    let browser_user_data_dir = browser
+        .config()
+        .and_then(|cfg| cfg.user_data_dir.as_ref())
+        .map(|path| path.display().to_string());
+    let daemon_state = Arc::new(DaemonState::new_with_session(SessionRuntime {
+        session_name: session.map(str::to_string),
+        launch_mode: launch_mode.clone(),
+        cdp_url: effective_cdp_url.clone(),
+        websocket_url: Some(browser.websocket_address().clone()),
+        browser_pid,
+        browser_user_data_dir,
+        socket_path: sock_path.to_string_lossy().to_string(),
+    }));
     logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
@@ -261,6 +340,19 @@ async fn run_daemon(
     // Bind Unix socket
     let listener = UnixListener::bind(&sock_path)?;
     info!("[gsd-browser-daemon] listening on {:?}", sock_path);
+
+    if let Some(page) = daemon_state.pages.lock().unwrap().active_page() {
+        let state = Arc::clone(&daemon_state);
+        tokio::spawn(async move {
+            let _ = handlers::session::sync_session_manifest(
+                page.as_ref(),
+                &state,
+                Some(SessionHealthStatus::Healthy),
+                None,
+            )
+            .await;
+        });
+    }
 
     // Trap termination signals so `daemon stop` can shut Chrome down cleanly.
     let shutdown = shutdown_signal();
@@ -289,6 +381,17 @@ async fn run_daemon(
     }
 
     // Clean shutdown
+    if let Some(page) = daemon_state.pages.lock().unwrap().active_page() {
+        let _ = handlers::session::sync_session_manifest(
+            page.as_ref(),
+            &daemon_state,
+            Some(SessionHealthStatus::Stopped),
+            Some("daemon stopped".to_string()),
+        )
+        .await;
+    } else {
+        let _ = handlers::session::mark_session_stopped(&daemon_state, "daemon stopped").await;
+    }
     drop(listener);
     let _ = browser.close().await;
     let _ = browser.wait().await;
@@ -475,6 +578,12 @@ async fn dispatch(
         diff.after = Some(after_state);
     }
 
+    if response.error.is_none()
+        && !matches!(req.method.as_str(), "health" | "session_summary" | "debug_bundle")
+    {
+        let _ = handlers::session::sync_session_manifest(page, state, None, None).await;
+    }
+
     response
 }
 
@@ -486,13 +595,10 @@ async fn dispatch_inner(
 ) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
-        "health" => DaemonResponse::success(
-            req.id,
-            json!({
-                "status": "ok",
-                "pid": process::id(),
-            }),
-        ),
+        "health" => match handlers::session::handle_health(page, state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "navigate" => match handlers::navigate::handle_navigate(page, &req.params, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
@@ -526,11 +632,11 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "eval" => match handlers::inspect::handle_eval(page, &req.params).await {
+        "eval" => match handlers::inspect::handle_eval(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "click" => match handlers::interaction::handle_click(page, &req.params).await {
+        "click" => match handlers::interaction::handle_click(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -539,7 +645,7 @@ async fn dispatch_inner(
                 json!({"retryHint": "Check selector is valid and element exists"}),
             ),
         },
-        "type" => match handlers::interaction::handle_type_text(page, &req.params).await {
+        "type" => match handlers::interaction::handle_type_text(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -552,7 +658,7 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "hover" => match handlers::interaction::handle_hover(page, &req.params).await {
+        "hover" => match handlers::interaction::handle_hover(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -566,12 +672,12 @@ async fn dispatch_inner(
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "select_option" => {
-            match handlers::interaction::handle_select_option(page, &req.params).await {
+            match handlers::interaction::handle_select_option(page, state, &req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "set_checked" => match handlers::interaction::handle_set_checked(page, &req.params).await {
+        "set_checked" => match handlers::interaction::handle_set_checked(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -604,15 +710,15 @@ async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "find" => match handlers::inspect::handle_find(page, &req.params).await {
+        "find" => match handlers::inspect::handle_find(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "page_source" => match handlers::inspect::handle_page_source(page, &req.params).await {
+        "page_source" => match handlers::inspect::handle_page_source(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "wait_for" => match handlers::wait::handle_wait_for(page, logs, &req.params).await {
+        "wait_for" => match handlers::wait::handle_wait_for(page, logs, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -692,7 +798,7 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "fill_form" => match handlers::forms::handle_fill_form(page, &req.params).await {
+        "fill_form" => match handlers::forms::handle_fill_form(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -705,7 +811,7 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "act" => match handlers::intent::handle_act(page, &req.params).await {
+        "act" => match handlers::intent::handle_act(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
                 req.id,
@@ -714,7 +820,7 @@ async fn dispatch_inner(
                 json!({"retryHint": "Check intent is valid and matching elements exist on page"}),
             ),
         },
-        "session_summary" => match handlers::session::handle_session_summary(logs, state) {
+        "session_summary" => match handlers::session::handle_session_summary(page, logs, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -778,10 +884,12 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "vault_login" => match handlers::auth_vault::handle_vault_login(page, &req.params, state).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "vault_login" => {
+            match handlers::auth_vault::handle_vault_login(page, &req.params, state).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "vault_list" => match handlers::auth_vault::handle_vault_list(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),

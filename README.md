@@ -87,8 +87,10 @@ gsd-browser screenshot --output page.png --format png
 ## Highlights
 
 - Persistent daemon with automatic startup for fast repeated commands
+- Durable named sessions with explicit health reporting and no silent session replacement
 - Versioned refs from `snapshot` for deterministic interaction (`@v1:e1`, `@v2:e3`)
 - Explicit assertions with `assert` and multi-step automation with `batch`
+- Shared inspection semantics across `snapshot`, `find`, `wait-for`, `assert`, and ref-driven actions
 - Semantic `find-best` and `act` flows covering 15 built-in intents
 - Named sessions via `--session` for isolated parallel browser workers
 - Structured JSON output on every command via `--json`
@@ -155,12 +157,13 @@ export GSD_BROWSER_VAULT_KEY=your-encryption-key
 ## How It Works
 
 - The CLI parses commands and sends them to a local daemon over a loopback HTTP channel.
-- The daemon maintains the browser lifecycle, page/frame routing, network hooks, and action timeline.
+- The daemon maintains the browser lifecycle, page/frame routing, network hooks, action timeline, and session manifest state.
 - `--session <name>` creates isolated daemon and browser instances for parallel workflows.
 
 ## For AI Agents
 
 - The daemon auto-starts. You almost never need `gsd-browser daemon start`.
+- `gsd-browser daemon health` reports the current session state and does not auto-start the daemon.
 - Use `--json` when you need structured output.
 - Prefer `snapshot` then `click-ref` or `fill-ref` for stable interaction, and re-snapshot after page changes.
 - Use `assert` and `batch` when you need deterministic pass/fail automation.

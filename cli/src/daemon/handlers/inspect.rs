@@ -3,7 +3,9 @@
 //! Console, network, and dialog handlers read from the shared log buffers.
 //! The eval, accessibility-tree, find, and page-source handlers execute via CDP.
 
+use crate::daemon::inspection;
 use crate::daemon::logs::DaemonLogs;
+use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use serde_json::{json, Value};
 use std::time::Duration;
@@ -112,7 +114,11 @@ pub fn handle_dialog(logs: &DaemonLogs, params: &Value) -> Result<Value, String>
 ///
 /// Params:
 /// - `expression` (string, required): JS expression to evaluate.
-pub async fn handle_eval(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_eval(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let expression = params
         .get("expression")
         .and_then(|v| v.as_str())
@@ -127,16 +133,22 @@ pub async fn handle_eval(page: &Page, params: &Value) -> Result<Value, String> {
         &expression[..expression.len().min(100)]
     );
 
-    let result = timeout(
-        Duration::from_secs(30),
-        page.evaluate_expression(expression),
-    )
-    .await
-    .map_err(|_| "eval timed out after 30s".to_string())?
-    .map_err(|e| format!("eval error: {}", super::clean_cdp_error(&e)))?;
+    let eval_result = inspection::eval_expression(page, state, expression).await?;
+    let ok = eval_result
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if !ok {
+        return Err(
+            eval_result
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("eval failed")
+                .to_string(),
+        );
+    }
 
-    // Serialize the result to a JSON string
-    let value = result.value().cloned().unwrap_or(Value::Null);
+    let value = eval_result.get("value").cloned().unwrap_or(Value::Null);
     let mut result_str = if let Some(s) = value.as_str() {
         s.to_string()
     } else {
@@ -270,7 +282,11 @@ pub async fn handle_accessibility_tree(page: &Page, params: &Value) -> Result<Va
 /// - `text` (string, optional): text content to match (case-insensitive contains).
 /// - `selector` (string, optional): CSS selector to scope search.
 /// - `limit` (u32, default 20): max elements to return.
-pub async fn handle_find(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_find(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let role = params.get("role").and_then(|v| v.as_str()).unwrap_or("");
     let text = params.get("text").and_then(|v| v.as_str()).unwrap_or("");
     let selector = params
@@ -288,83 +304,18 @@ pub async fn handle_find(page: &Page, params: &Value) -> Result<Value, String> {
         role, text, selector, limit
     );
 
-    let js = format!(
-        r#"(() => {{
-  const pi = window.__pi || {{}};
-  const role = {role_json};
-  const searchText = {text_json};
-  const sel = {selector_json};
-  const limit = {limit};
-
-  let candidates;
-  if (sel) {{
-    try {{
-      candidates = Array.from(document.querySelectorAll(sel));
-    }} catch(e) {{
-      return JSON.stringify({{ elements: [], count: 0, truncated: false, error: "invalid selector: " + e.message }});
-    }}
-  }} else {{
-    candidates = Array.from(document.querySelectorAll("*"));
-  }}
-
-  const results = [];
-  for (let i = 0; i < candidates.length; i++) {{
-    if (results.length >= limit) break;
-    const el = candidates[i];
-
-    // Filter by role if specified
-    const elRole = pi.inferRole ? pi.inferRole(el) : "";
-    if (role && elRole !== role) continue;
-
-    // Filter by text if specified
-    const elText = (el.textContent || "").trim().replace(/\s+/g, " ");
-    if (searchText && elText.toLowerCase().indexOf(searchText.toLowerCase()) === -1) continue;
-
-    // Filter out invisible elements (unless looking by selector only)
-    const visible = pi.isVisible ? pi.isVisible(el) : true;
-    if (!visible && !sel) continue;
-
-    const name = pi.accessibleName ? pi.accessibleName(el) : elText.slice(0, 80);
-    const enabled = pi.isEnabled ? pi.isEnabled(el) : true;
-    const hints = pi.selectorHints ? pi.selectorHints(el) : [];
-
-    results.push({{
-      tag: el.tagName.toLowerCase(),
-      role: elRole,
-      name: name,
-      selector_hint: hints.length > 0 ? hints[0] : "",
-      visible: visible,
-      enabled: enabled,
-      text: elText.slice(0, 80)
-    }});
-  }}
-
-  return JSON.stringify({{ elements: results, count: results.length, truncated: results.length >= limit }});
-}})()"#,
-        role_json = serde_json::to_string(role).unwrap(),
-        text_json = serde_json::to_string(text).unwrap(),
-        selector_json = serde_json::to_string(selector).unwrap(),
-        limit = limit,
-    );
-
-    let result = timeout(Duration::from_secs(30), page.evaluate_expression(&js))
-        .await
-        .map_err(|_| "find timed out after 30s".to_string())?
-        .map_err(|e| format!("find error: {}", super::clean_cdp_error(&e)))?;
-
-    let value = result.value().cloned().unwrap_or(Value::Null);
-    let json_str = value.as_str().unwrap_or("{}");
-    let parsed: Value =
-        serde_json::from_str(json_str).map_err(|e| format!("failed to parse find result: {e}"))?;
-
-    Ok(parsed)
+    inspection::find_elements(page, state, role, text, selector, limit).await
 }
 
 /// Handle `page_source` command — returns raw HTML of the page or a scoped element.
 ///
 /// Params:
 /// - `selector` (string, optional): CSS selector to scope the source.
-pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_page_source(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -372,31 +323,34 @@ pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, St
 
     debug!("handle_page_source: selector={:?}", selector);
 
-    let mut html = if selector.is_empty() {
-        // Use Page::content() for full page HTML
-        let content = timeout(Duration::from_secs(30), page.content())
-            .await
-            .map_err(|_| "page_source timed out after 30s".to_string())?
-            .map_err(|e| format!("page_source error: {}", super::clean_cdp_error(&e)))?;
-        content
-    } else {
-        // Evaluate JS to get outerHTML of the selected element
-        let js = format!(
-            r#"(() => {{
-  const el = document.querySelector('{}');
-  return el ? el.outerHTML : '';
-}})()"#,
-            selector.replace('\'', "\\'")
+    let source = inspection::page_source(
+        page,
+        state,
+        if selector.is_empty() {
+            None
+        } else {
+            Some(selector)
+        },
+    )
+    .await?;
+    let ok = source
+        .get("ok")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    if !ok {
+        return Err(
+            source
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("page_source failed")
+                .to_string(),
         );
-
-        let result = timeout(Duration::from_secs(30), page.evaluate_expression(&js))
-            .await
-            .map_err(|_| "page_source timed out after 30s".to_string())?
-            .map_err(|e| format!("page_source error: {}", super::clean_cdp_error(&e)))?;
-
-        let value = result.value().cloned().unwrap_or(Value::Null);
-        value.as_str().unwrap_or("").to_string()
-    };
+    }
+    let mut html = source
+        .get("html")
+        .and_then(|value| value.as_str())
+        .unwrap_or("")
+        .to_string();
 
     let length = html.len();
     let truncated = length > PAGE_SOURCE_MAX_BYTES;
@@ -409,5 +363,8 @@ pub async fn handle_page_source(page: &Page, params: &Value) -> Result<Value, St
         "length": length,
         "truncated": truncated,
         "selector": if selector.is_empty() { Value::Null } else { Value::String(selector.to_string()) },
+        "frameLabel": source.get("frameLabel").cloned().unwrap_or(Value::Null),
+        "frameUrl": source.get("frameUrl").cloned().unwrap_or(Value::Null),
+        "boundaries": source.get("boundaries").cloned().unwrap_or_else(|| json!([])),
     }))
 }

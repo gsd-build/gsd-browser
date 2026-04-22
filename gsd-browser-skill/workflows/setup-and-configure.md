@@ -18,7 +18,9 @@ cd gsd-browser
 cargo install --path cli
 
 # Verify
+gsd-browser daemon start
 gsd-browser daemon health
+gsd-browser daemon stop
 ```
 
 The installer downloads the binary and reuses a system Chrome/Chromium when present. Otherwise it downloads Chromium automatically when Chrome for Testing is available for the platform.
@@ -106,10 +108,10 @@ gsd-browser --session site2 daemon stop
 
 **Step 6: Daemon management**
 
-The daemon auto-starts on first command. Manual management is rarely needed:
+The daemon auto-starts on browser commands. `daemon health` reports state and does not start a session. Manual management is rarely needed:
 
 ```bash
-gsd-browser daemon health     # Check status (returns PID)
+gsd-browser daemon health     # Check status of the current session
 gsd-browser daemon stop       # Stop daemon and Chrome
 gsd-browser daemon start      # Explicit start (rarely needed)
 ```
@@ -129,7 +131,8 @@ gsd-browser daemon stop
 
 <success_criteria>
 Setup is complete when:
-- `gsd-browser daemon health` returns successfully
+- `gsd-browser daemon start` succeeds
+- `gsd-browser daemon health` reports `healthy` after startup
 - Browser path is configured (if not in default location)
 - Vault key is set (if using auth vault)
 - Project config exists (if project-specific settings are needed)

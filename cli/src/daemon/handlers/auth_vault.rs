@@ -225,7 +225,7 @@ pub async fn handle_vault_login(
         "submit": true,
     });
 
-    match super::forms::handle_fill_form(page, &fill_params).await {
+    match super::forms::handle_fill_form(page, state, &fill_params).await {
         Ok(_) => {
             info!("[auth_vault] logged in with profile '{}'", profile);
         }

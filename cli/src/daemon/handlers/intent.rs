@@ -8,7 +8,9 @@
 
 use super::interaction::handle_click;
 use crate::daemon::capture::capture_compact_page_state;
+use crate::daemon::inspection;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
+use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
@@ -413,7 +415,11 @@ pub async fn handle_find_best(page: &Page, params: &Value) -> Result<Value, Stri
 /// click it (or focus for search_field), settle, and capture state.
 ///
 /// Params: { intent: string, scope?: string }
-pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_act(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let intent = params
         .get("intent")
         .and_then(|v| v.as_str())
@@ -454,19 +460,27 @@ pub async fn handle_act(page: &Page, params: &Value) -> Result<Value, String> {
         "search_field" | "fill_email" | "fill_password" | "fill_username"
     ) {
         // Focus the search field instead of clicking
-        let focus_js = format!(
-            "(() => {{ const el = document.querySelector({sel}); if (!el) throw new Error('element not found'); el.focus(); return true; }})()",
-            sel = serde_json::to_string(selector).unwrap()
-        );
-        timeout(JS_TIMEOUT, page.evaluate_expression(&focus_js))
-            .await
-            .map_err(|_| "act: focus timed out".to_string())?
-            .map_err(|e| format!("act: focus failed: {}", super::clean_cdp_error(&e)))?;
+        let focused =
+            inspection::perform_selector_action(page, state, selector, "focus", &json!({}), true)
+                .await?;
+        if !focused
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false)
+        {
+            return Err(
+                focused
+                    .get("error")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("act: focus failed")
+                    .to_string(),
+            );
+        }
         action_performed = "focus";
     } else {
         // Click the element
         let click_params = json!({ "selector": selector });
-        handle_click(page, &click_params).await?;
+        handle_click(page, state, &click_params).await?;
         action_performed = "click";
     }
 

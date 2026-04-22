@@ -103,14 +103,14 @@ async fn dispatch_step(
 ) -> Result<Value, String> {
     let result = match action {
         "navigate" => handlers::navigate::handle_navigate(page, step, state).await,
-        "click" => handlers::interaction::handle_click(page, step).await,
-        "type" => handlers::interaction::handle_type_text(page, step).await,
+        "click" => handlers::interaction::handle_click(page, state, step).await,
+        "type" => handlers::interaction::handle_type_text(page, state, step).await,
         "key_press" => handlers::interaction::handle_press(page, step).await,
-        "wait_for" => handlers::wait::handle_wait_for(page, logs, step).await,
+        "wait_for" => handlers::wait::handle_wait_for(page, logs, state, step).await,
         "assert" => handlers::assert_cmd::handle_assert(page, logs, state, step).await,
         "click_ref" => handlers::refs::handle_click_ref(page, state, step).await,
         "fill_ref" => handlers::refs::handle_fill_ref(page, state, step).await,
-        "hover" => handlers::interaction::handle_hover(page, step).await,
+        "hover" => handlers::interaction::handle_hover(page, state, step).await,
         "hover_ref" => handlers::refs::handle_hover_ref(page, state, step).await,
         "scroll" => handlers::interaction::handle_scroll(page, step).await,
         "press" => handlers::interaction::handle_press(page, step).await,

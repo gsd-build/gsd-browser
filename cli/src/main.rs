@@ -4,9 +4,14 @@ mod output;
 
 use clap::{Parser, Subcommand};
 use gsd_browser_common::config::Config;
+use gsd_browser_common::validate_session_name;
 
 #[derive(Parser)]
-#[command(name = "gsd-browser", version, about = "Browser automation CLI powered by CDP")]
+#[command(
+    name = "gsd-browser",
+    version,
+    about = "Browser automation CLI powered by CDP"
+)]
 pub struct Cli {
     /// Output as JSON
     #[arg(long, global = true)]
@@ -615,6 +620,22 @@ async fn main() {
     if cli.cdp_url.is_none() {
         cli.cdp_url = config.browser.cdp_url.clone();
     }
+    if let Err(err) = validate_session_name(cli.session.as_deref()) {
+        if cli.json {
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "error": {
+                        "message": err,
+                    }
+                }))
+                .unwrap()
+            );
+        } else {
+            eprintln!("Error: {err}");
+        }
+        std::process::exit(1);
+    }
 
     let result = match &cli.command {
         Commands::Serve {
@@ -622,7 +643,9 @@ async fn main() {
             cdp_url,
             session,
         } => {
-            if let Err(e) = daemon::run(browser_path.clone(), session.clone(), cdp_url.clone()).await {
+            if let Err(e) =
+                daemon::run(browser_path.clone(), session.clone(), cdp_url.clone()).await
+            {
                 eprintln!("[gsd-browser-daemon] fatal: {e}");
                 std::process::exit(1);
             }
@@ -902,7 +925,12 @@ async fn main() {
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
 
 async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
-    daemon_client::start_daemon(cli.browser_path.as_deref(), cli.cdp_url.as_deref(), cli.session.as_deref()).await?;
+    daemon_client::start_daemon(
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
     if cli.json {
         println!("{}", serde_json::json!({"status": "started"}));
     } else {
@@ -922,36 +950,23 @@ async fn cmd_daemon_stop(cli: &Cli) -> CmdResult {
 }
 
 async fn cmd_daemon_health(cli: &Cli) -> CmdResult {
-    let resp = daemon_client::send_request(
-        "health",
-        serde_json::json!({}),
-        cli.browser_path.as_deref(),
-        cli.cdp_url.as_deref(),
-        cli.session.as_deref(),
-    )
-    .await?;
-    if let Some(result) = resp.result {
-        if cli.json {
-            println!("{}", output::format_json(&result));
-        } else {
-            println!(
-                "Daemon: {}",
-                result
-                    .get("status")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown")
-            );
-            if let Some(pid) = result.get("pid") {
-                println!("PID: {pid}");
+    let result = daemon_client::collect_health(cli.session.as_deref()).await?;
+    if cli.json {
+        println!("{}", output::format_json(&result));
+    } else if let Some(session) = result.get("session") {
+        let status = session
+            .get("status")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        println!("Daemon: {status}");
+        if let Some(pid) = session.get("daemonPid").and_then(|value| value.as_i64()) {
+            println!("PID: {pid}");
+        }
+        if let Some(reason) = session.get("reason").and_then(|value| value.as_str()) {
+            if !reason.is_empty() {
+                println!("Reason: {reason}");
             }
         }
-    } else if let Some(err) = resp.error {
-        if cli.json {
-            eprintln!("{}", output::format_error_json(&err));
-        } else {
-            eprintln!("{}", output::format_error_text(&err));
-        }
-        std::process::exit(1);
     }
     Ok(())
 }

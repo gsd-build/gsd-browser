@@ -55,8 +55,7 @@ fn request_failure_does_not_replace_live_session_bookkeeping() {
             session,
             "--browser-path",
             "/definitely/missing/chrome",
-            "daemon",
-            "health",
+            "back",
         ])
         .output()
         .expect("run gsd-browser");
