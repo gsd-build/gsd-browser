@@ -670,6 +670,10 @@ async fn main() {
             eprintln!("Error: project identity requires --identity-project");
             std::process::exit(1);
         }
+        if scope != "project" && cli.identity_project.is_some() {
+            eprintln!("Error: --identity-project is only valid with --identity-scope=project");
+            std::process::exit(1);
+        }
         std::env::set_var("GSD_BROWSER_IDENTITY_SCOPE", scope);
     } else {
         if cli.identity_key.is_some() {

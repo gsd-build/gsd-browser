@@ -154,6 +154,10 @@ async fn run_daemon(
     if identity_scope.is_none() && identity_project_id_arg.is_some() {
         return Err("--identity-project requires --identity-scope".into());
     }
+    if identity_project_id_arg.is_some() && !matches!(identity_scope, Some(IdentityScope::Project))
+    {
+        return Err("--identity-project is only valid with --identity-scope=project".into());
+    }
     if matches!(identity_scope, Some(IdentityScope::Project)) && identity_project_id_arg.is_none() {
         return Err("project identity requires --identity-project".into());
     }
