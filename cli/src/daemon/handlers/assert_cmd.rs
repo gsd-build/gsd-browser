@@ -134,12 +134,13 @@ pub async fn handle_assert(
 
         let (passed, expected, actual) = match kind {
             "url_contains" => {
-                let actual_url = target_url
-                    .get("url")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let actual_url = target_url.get("url").and_then(|v| v.as_str()).unwrap_or("");
                 let pass = actual_url.contains(text);
-                (pass, format!("URL contains '{text}'"), actual_url.to_string())
+                (
+                    pass,
+                    format!("URL contains '{text}'"),
+                    actual_url.to_string(),
+                )
             }
             "text_visible" => {
                 if !text_cache.contains_key(text) {
@@ -199,11 +200,7 @@ pub async fn handle_assert(
                     .and_then(|v| v.get("visible"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let exists = sel_state
-                    .get("count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    > 0;
+                let exists = sel_state.get("count").and_then(|v| v.as_u64()).unwrap_or(0) > 0;
                 let actual_str = if exists {
                     if pass {
                         "visible"
@@ -235,11 +232,7 @@ pub async fn handle_assert(
                     .and_then(|v| v.get("visible"))
                     .and_then(|v| v.as_bool())
                     .unwrap_or(false);
-                let exists = sel_state
-                    .get("count")
-                    .and_then(|v| v.as_u64())
-                    .unwrap_or(0)
-                    > 0;
+                let exists = sel_state.get("count").and_then(|v| v.as_u64()).unwrap_or(0) > 0;
                 // Hidden means: doesn't exist OR not visible
                 let pass = !exists || !is_visible;
                 let actual_str = if !exists {

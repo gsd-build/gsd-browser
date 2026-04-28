@@ -1,5 +1,7 @@
 pub mod chrome;
+pub mod cloud;
 pub mod config;
+pub mod identity;
 pub mod ipc;
 pub mod session;
 pub mod types;

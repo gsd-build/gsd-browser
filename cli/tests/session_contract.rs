@@ -411,7 +411,10 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
     assert!(ref_names.iter().any(|value| value == "Far CTA"));
     assert!(ref_names.iter().any(|value| value == "Dismiss"));
 
-    let boundaries = snapshot["boundaries"].as_array().cloned().unwrap_or_default();
+    let boundaries = snapshot["boundaries"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
     assert!(
         boundaries.iter().any(|boundary| {
             boundary["reason"]
@@ -503,11 +506,7 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
         { "kind": "text_visible", "text": "Frame hover" }
     ]))
     .expect("serialize hover assert");
-    let hover_result = env.json(&[
-        "assert".to_string(),
-        "--checks".to_string(),
-        hover_assert,
-    ]);
+    let hover_result = env.json(&["assert".to_string(), "--checks".to_string(), hover_assert]);
     assert_eq!(hover_result["verified"], true);
 
     let direct_select = env.json(&[
@@ -521,11 +520,7 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
         { "kind": "text_visible", "text": "Shadow select Beta" }
     ]))
     .expect("serialize select assert");
-    let select_result = env.json(&[
-        "assert".to_string(),
-        "--checks".to_string(),
-        select_assert,
-    ]);
+    let select_result = env.json(&["assert".to_string(), "--checks".to_string(), select_assert]);
     assert_eq!(select_result["verified"], true);
 
     let direct_check = env.json(&[
@@ -539,11 +534,7 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
         { "kind": "text_visible", "text": "Frame checked true" }
     ]))
     .expect("serialize checked assert");
-    let checked_result = env.json(&[
-        "assert".to_string(),
-        "--checks".to_string(),
-        checked_assert,
-    ]);
+    let checked_result = env.json(&["assert".to_string(), "--checks".to_string(), checked_assert]);
     assert_eq!(checked_result["verified"], true);
 
     let shadow_ref = ref_id_by_name(&snapshot, "Shadow CTA");
@@ -556,11 +547,7 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
         { "kind": "text_visible", "text": "Shadow clicked" }
     ]))
     .expect("serialize shadow assert");
-    let shadow_result = env.json(&[
-        "assert".to_string(),
-        "--checks".to_string(),
-        shadow_assert,
-    ]);
+    let shadow_result = env.json(&["assert".to_string(), "--checks".to_string(), shadow_assert]);
     assert_eq!(shadow_result["verified"], true);
 
     let filled = env.json(&[
@@ -568,20 +555,13 @@ fn unified_inspection_and_ref_actions_cover_shadow_iframe_dynamic_long_page_and_
         frame_input_ref.clone(),
         "Frame typed".to_string(),
     ]);
-    assert_eq!(
-        filled["ref_resolution"]["frameLabel"],
-        "same-origin-frame"
-    );
+    assert_eq!(filled["ref_resolution"]["frameLabel"], "same-origin-frame");
 
     let frame_assert = serde_json::to_string(&json!([
         { "kind": "text_visible", "text": "Frame typed" }
     ]))
     .expect("serialize frame assert");
-    let frame_result = env.json(&[
-        "assert".to_string(),
-        "--checks".to_string(),
-        frame_assert,
-    ]);
+    let frame_result = env.json(&["assert".to_string(), "--checks".to_string(), frame_assert]);
     assert_eq!(frame_result["verified"], true);
 
     env.stop();

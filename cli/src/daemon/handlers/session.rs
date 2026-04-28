@@ -153,7 +153,10 @@ async fn probe_active_page(page: &Page) -> (bool, String, String) {
 
 fn current_active_page(state: &DaemonState) -> (u64, usize, String, String) {
     let pages = state.pages.lock().unwrap();
-    let active = pages.entries.iter().find(|entry| entry.id == pages.active_page_id);
+    let active = pages
+        .entries
+        .iter()
+        .find(|entry| entry.id == pages.active_page_id);
     match active {
         Some(entry) => (
             entry.id,
@@ -227,10 +230,7 @@ fn build_and_persist_manifest(
     Ok(manifest)
 }
 
-fn session_identity_json(
-    state: &DaemonState,
-    manifest: &SessionManifest,
-) -> Value {
+fn session_identity_json(state: &DaemonState, manifest: &SessionManifest) -> Value {
     let browser_connected = matches!(
         manifest.health,
         SessionHealthStatus::Healthy | SessionHealthStatus::Recovering
@@ -293,7 +293,8 @@ pub async fn sync_session_manifest(
 }
 
 pub async fn mark_session_stopped(state: &DaemonState, reason: &str) -> Result<(), String> {
-    let (active_page_id, _page_count, active_page_url, active_page_title) = current_active_page(state);
+    let (active_page_id, _page_count, active_page_url, active_page_title) =
+        current_active_page(state);
     let _ = build_and_persist_manifest(
         state,
         SessionHealthStatus::Stopped,
