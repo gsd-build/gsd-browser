@@ -17,4 +17,8 @@ fn identity_names_reject_path_traversal() {
     let err = identity_profile_dir(IdentityScope::Project, Some("project_123"), "../secret")
         .expect_err("invalid identity key");
     assert!(err.contains("invalid name"));
+
+    let err = identity_profile_dir(IdentityScope::Project, Some("../secret"), "project_123")
+        .expect_err("invalid project id");
+    assert!(err.contains("invalid name"));
 }

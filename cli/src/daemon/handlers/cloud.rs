@@ -1,16 +1,26 @@
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
+    InsertTextParams,
+};
+use chromiumoxide::keys;
 use chromiumoxide::Page;
 use gsd_browser_common::cloud::{CloudFrame, CloudSessionStatus, CloudToolRequest, CloudUserInput};
 use gsd_browser_common::identity::{
     identity_metadata_path, identity_profile_dir, BrowserIdentity, IdentityScope,
 };
+use image::{GenericImageView, ImageReader};
 use serde_json::{json, Value};
 use std::fs;
+use std::io::Cursor;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::timeout;
 
 use crate::daemon::{handlers, logs::DaemonLogs, state::DaemonState};
 
 static FRAME_SEQUENCE: AtomicU64 = AtomicU64::new(1);
+const INPUT_TIMEOUT: Duration = Duration::from_secs(5);
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -28,6 +38,95 @@ async fn page_title(page: &Page) -> String {
         .await
         .unwrap_or_default()
         .unwrap_or_default()
+}
+
+fn image_dimensions_from_base64(data: &str) -> Option<(u32, u32)> {
+    let bytes = BASE64.decode(data).ok()?;
+    let image = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?;
+    Some(image.dimensions())
+}
+
+async fn viewport_center(page: &Page) -> (f64, f64) {
+    let value = page
+        .evaluate_expression(
+            r#"(() => ({
+                x: Math.max(0, Math.round(window.innerWidth / 2)),
+                y: Math.max(0, Math.round(window.innerHeight / 2))
+            }))()"#,
+        )
+        .await
+        .ok()
+        .and_then(|result| result.into_value().ok())
+        .unwrap_or_else(|| json!({"x": 0, "y": 0}));
+    (
+        value.get("x").and_then(Value::as_f64).unwrap_or_default(),
+        value.get("y").and_then(Value::as_f64).unwrap_or_default(),
+    )
+}
+
+async fn scroll_info(page: &Page) -> Value {
+    page.evaluate_expression(
+        r#"(() => ({
+            x: Math.round(window.scrollX),
+            y: Math.round(window.scrollY),
+            height: document.documentElement.scrollHeight,
+            viewportHeight: window.innerHeight
+        }))()"#,
+    )
+    .await
+    .ok()
+    .and_then(|result| result.into_value().ok())
+    .unwrap_or_else(|| json!({}))
+}
+
+async fn dispatch_text(page: &Page, text: &str) -> Result<(), String> {
+    for character in text.chars() {
+        let key = character.to_string();
+        let Some(key_definition) = keys::get_key_definition(&key) else {
+            page.execute(InsertTextParams::new(key))
+                .await
+                .map_err(|err| format!("insert text failed: {err}"))?;
+            continue;
+        };
+
+        let mut command = DispatchKeyEventParams::builder()
+            .key(key_definition.key)
+            .code(key_definition.code)
+            .windows_virtual_key_code(key_definition.key_code)
+            .native_virtual_key_code(key_definition.key_code);
+
+        let key_down_event_type = if let Some(text) = key_definition.text {
+            command = command.text(text);
+            DispatchKeyEventType::KeyDown
+        } else if key_definition.key.len() == 1 {
+            command = command.text(key_definition.key);
+            DispatchKeyEventType::KeyDown
+        } else {
+            DispatchKeyEventType::RawKeyDown
+        };
+
+        let key_down = command
+            .clone()
+            .r#type(key_down_event_type)
+            .build()
+            .map_err(|err| err.to_string())?;
+        page.execute(key_down)
+            .await
+            .map_err(|err| format!("key down failed: {err}"))?;
+
+        let key_up = command
+            .r#type(DispatchKeyEventType::KeyUp)
+            .build()
+            .map_err(|err| err.to_string())?;
+        page.execute(key_up)
+            .await
+            .map_err(|err| format!("key up failed: {err}"))?;
+    }
+    Ok(())
 }
 
 fn runtime_identity(state: &DaemonState) -> Option<BrowserIdentity> {
@@ -67,14 +166,20 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    let width = shot
+    let mut width = shot
         .get("width")
         .and_then(Value::as_u64)
         .unwrap_or_default() as u32;
-    let height = shot
+    let mut height = shot
         .get("height")
         .and_then(Value::as_u64)
         .unwrap_or_default() as u32;
+    if (width == 0 || height == 0) && !data.is_empty() {
+        if let Some((decoded_width, decoded_height)) = image_dimensions_from_base64(&data) {
+            width = decoded_width;
+            height = decoded_height;
+        }
+    }
     let frame = CloudFrame {
         sequence: FRAME_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         content_type: "image/jpeg".to_string(),
@@ -141,42 +246,39 @@ pub async fn handle_cloud_user_input(
         }
         "type" => {
             let text = input.text.ok_or("type requires text")?;
-            let script = format!(
-                r#"(() => {{
-                    const text = {text_json};
-                    const target = document.activeElement;
-                    if (!target) return {{ typed: 0, active: false }};
-                    if ("value" in target) {{
-                        target.value = `${{target.value ?? ""}}${{text}}`;
-                        target.dispatchEvent(new InputEvent("input", {{ bubbles: true, data: text, inputType: "insertText" }}));
-                        target.dispatchEvent(new Event("change", {{ bubbles: true }}));
-                    }} else {{
-                        target.textContent = `${{target.textContent ?? ""}}${{text}}`;
-                        target.dispatchEvent(new InputEvent("input", {{ bubbles: true, data: text, inputType: "insertText" }}));
-                    }}
-                    return {{ typed: text.length, active: true }};
-                }})()"#,
-                text_json = serde_json::to_string(&text).map_err(|err| err.to_string())?
-            );
-            let value = page
-                .evaluate_expression(script)
+            timeout(INPUT_TIMEOUT, dispatch_text(page, &text))
                 .await
-                .map_err(|err| err.to_string())?
-                .into_value()
-                .unwrap_or_else(|_| json!({"typed": text.len()}));
-            Ok(value)
+                .map_err(|_| "type timed out".to_string())?
+                .map_err(|err| format!("type failed: {err}"))?;
+            Ok(json!({ "typed": text.len() }))
         }
         "wheel" => {
             let delta_x = input.delta_x.unwrap_or_default();
             let delta_y = input.delta_y.unwrap_or_default();
-            handlers::interaction::handle_scroll(
-                page,
-                &json!({
-                    "direction": if delta_y < 0.0 { "up" } else { "down" },
-                    "amount": delta_y.abs().max(delta_x.abs()) as i32,
-                }),
-            )
-            .await
+            let (default_x, default_y) = viewport_center(page).await;
+            let x = input.x.unwrap_or(default_x);
+            let y = input.y.unwrap_or(default_y);
+            let params = DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseWheel)
+                .x(x)
+                .y(y)
+                .delta_x(delta_x)
+                .delta_y(delta_y)
+                .build()
+                .map_err(|err| err.to_string())?;
+            timeout(INPUT_TIMEOUT, page.execute(params))
+                .await
+                .map_err(|_| "wheel timed out".to_string())?
+                .map_err(|err| format!("wheel failed: {err}"))?;
+            Ok(json!({
+                "wheel": {
+                    "x": x,
+                    "y": y,
+                    "deltaX": delta_x,
+                    "deltaY": delta_y,
+                },
+                "scroll": scroll_info(page).await,
+            }))
         }
         _ => Err(format!("unsupported user input kind: {}", input.kind)),
     }
@@ -194,6 +296,9 @@ pub fn handle_cloud_identity_list(params: &Value) -> Result<Value, String> {
         .map(IdentityScope::parse)
         .transpose()?;
     let project_id = params.get("projectId").and_then(Value::as_str);
+    if matches!(scope, Some(IdentityScope::Project)) && project_id.is_none() {
+        return Err("project identity requires projectId".to_string());
+    }
     let mut identities = Vec::new();
     let scopes: Vec<IdentityScope> = match scope {
         Some(scope) => vec![scope],
@@ -204,27 +309,33 @@ pub fn handle_cloud_identity_list(params: &Value) -> Result<Value, String> {
         ],
     };
     for scope in scopes {
-        let root = match scope {
+        let roots = match scope {
             IdentityScope::Project => {
-                let Some(project_id) = project_id else {
-                    continue;
-                };
-                gsd_browser_common::state_dir()
+                let project_root = gsd_browser_common::state_dir()
                     .join("identities")
-                    .join(scope.as_dir())
-                    .join(gsd_browser_common::sanitize_filename(project_id)?)
+                    .join(scope.as_dir());
+                if let Some(project_id) = project_id {
+                    vec![project_root.join(gsd_browser_common::sanitize_filename(project_id)?)]
+                } else {
+                    match fs::read_dir(project_root) {
+                        Ok(entries) => entries.flatten().map(|entry| entry.path()).collect(),
+                        Err(_) => Vec::new(),
+                    }
+                }
             }
-            _ => gsd_browser_common::state_dir()
+            _ => vec![gsd_browser_common::state_dir()
                 .join("identities")
-                .join(scope.as_dir()),
+                .join(scope.as_dir())],
         };
-        let Ok(entries) = fs::read_dir(root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path().join("identity.json");
-            if let Some(identity) = read_identity(path) {
-                identities.push(identity);
+        for root in roots {
+            let Ok(entries) = fs::read_dir(root) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let path = entry.path().join("identity.json");
+                if let Some(identity) = read_identity(path) {
+                    identities.push(identity);
+                }
             }
         }
     }

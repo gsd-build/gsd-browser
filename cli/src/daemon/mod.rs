@@ -148,6 +148,12 @@ async fn run_daemon(
         .map(IdentityScope::parse)
         .transpose()
         .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+    if identity_scope.is_none() && identity_key_arg.is_some() {
+        return Err("--identity-key requires --identity-scope".into());
+    }
+    if identity_scope.is_none() && identity_project_id_arg.is_some() {
+        return Err("--identity-project requires --identity-scope".into());
+    }
     if matches!(identity_scope, Some(IdentityScope::Project)) && identity_project_id_arg.is_none() {
         return Err("project identity requires --identity-project".into());
     }
@@ -618,16 +624,51 @@ async fn dispatch(
         diff.after = Some(after_state);
     }
 
-    if response.error.is_none()
-        && !matches!(
-            req.method.as_str(),
-            "health" | "session_summary" | "debug_bundle"
-        )
-    {
+    if response.error.is_none() && should_sync_session_manifest(req.method.as_str()) {
         let _ = handlers::session::sync_session_manifest(page, state, None, None).await;
     }
 
     response
+}
+
+fn should_sync_session_manifest(method: &str) -> bool {
+    matches!(
+        method,
+        "navigate"
+            | "back"
+            | "forward"
+            | "reload"
+            | "click"
+            | "type"
+            | "press"
+            | "hover"
+            | "scroll"
+            | "select_option"
+            | "set_checked"
+            | "drag"
+            | "set_viewport"
+            | "upload_file"
+            | "click_ref"
+            | "hover_ref"
+            | "fill_ref"
+            | "fill_form"
+            | "act"
+            | "cloud_tool"
+            | "cloud_user_input"
+            | "switch_page"
+            | "close_page"
+            | "select_frame"
+            | "mock_route"
+            | "block_urls"
+            | "clear_routes"
+            | "emulate_device"
+            | "save_state"
+            | "restore_state"
+            | "vault_save"
+            | "vault_login"
+            | "trace_start"
+            | "trace_stop"
+    )
 }
 
 pub(crate) async fn dispatch_inner(

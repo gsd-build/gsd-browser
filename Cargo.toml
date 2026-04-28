@@ -18,7 +18,7 @@ thiserror = "2"
 tracing = "0.1"
 toml = "0.8"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 aes-gcm = "0.10"
 argon2 = "0.5"
 rand = "0.8"

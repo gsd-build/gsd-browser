@@ -323,7 +323,10 @@ fn selected_frame_value(state: &DaemonState) -> Value {
             json!({"kind": "name", "value": value.trim_start_matches("name:")})
         }
         Some(value) if value.starts_with("index:") => {
-            let parsed = value.trim_start_matches("index:").parse::<u64>().unwrap_or(0);
+            let parsed = value
+                .trim_start_matches("index:")
+                .parse::<u64>()
+                .unwrap_or(0);
             json!({"kind": "index", "value": parsed})
         }
         Some(value) if value.starts_with("url:") => {
@@ -437,7 +440,12 @@ pub async fn selector_query(
 "#,
         selector = serde_json::to_string(selector).unwrap()
     );
-    eval_json_value(page, &build_js(state, include_frames, &body), "selector_query").await
+    eval_json_value(
+        page,
+        &build_js(state, include_frames, &body),
+        "selector_query",
+    )
+    .await
 }
 
 pub async fn resolve_selector_target(
@@ -490,7 +498,12 @@ pub async fn resolve_selector_target(
         selector = serde_json::to_string(selector).unwrap(),
         prefer_visible = if prefer_visible { "true" } else { "false" },
     );
-    eval_json_value(page, &build_js(state, true, &body), "resolve_selector_target").await
+    eval_json_value(
+        page,
+        &build_js(state, true, &body),
+        "resolve_selector_target",
+    )
+    .await
 }
 
 pub async fn perform_selector_action(
@@ -658,7 +671,12 @@ pub async fn perform_selector_action(
         options = serde_json::to_string(options).unwrap(),
         prefer_visible = if prefer_visible { "true" } else { "false" },
     );
-    eval_json_value(page, &build_js(state, true, &body), "perform_selector_action").await
+    eval_json_value(
+        page,
+        &build_js(state, true, &body),
+        "perform_selector_action",
+    )
+    .await
 }
 
 pub async fn text_query(

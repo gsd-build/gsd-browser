@@ -671,6 +671,15 @@ async fn main() {
             std::process::exit(1);
         }
         std::env::set_var("GSD_BROWSER_IDENTITY_SCOPE", scope);
+    } else {
+        if cli.identity_key.is_some() {
+            eprintln!("Error: --identity-key requires --identity-scope");
+            std::process::exit(1);
+        }
+        if cli.identity_project.is_some() {
+            eprintln!("Error: --identity-project requires --identity-scope");
+            std::process::exit(1);
+        }
     }
     if let Some(key) = cli.identity_key.as_deref() {
         std::env::set_var("GSD_BROWSER_IDENTITY_KEY", key);

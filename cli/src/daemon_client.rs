@@ -452,7 +452,7 @@ pub async fn collect_health(
             "browserUserDataDir": manifest.browser_user_data_dir,
             "identityScope": manifest.identity_scope,
             "identityProjectId": manifest.identity_project_id,
-            "identityKey": manifest.identity_key,
+            "identityKey": manifest.identity_key.as_ref().map(|_| "<redacted>"),
             "lastHeartbeatAt": manifest.last_heartbeat_at,
             "lastUpdatedAt": manifest.last_updated_at,
             "daemonAlive": daemon_alive,
