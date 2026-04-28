@@ -61,6 +61,12 @@ pub struct SessionManifest {
     #[serde(default)]
     pub browser_user_data_dir: Option<String>,
     #[serde(default)]
+    pub identity_scope: Option<crate::identity::IdentityScope>,
+    #[serde(default)]
+    pub identity_project_id: Option<String>,
+    #[serde(default)]
+    pub identity_key: Option<String>,
+    #[serde(default)]
     pub health: SessionHealthStatus,
     #[serde(default)]
     pub health_reason: String,
@@ -95,6 +101,9 @@ impl Default for SessionManifest {
             cdp_url: None,
             websocket_url: None,
             browser_user_data_dir: None,
+            identity_scope: None,
+            identity_project_id: None,
+            identity_key: None,
             health: SessionHealthStatus::Starting,
             health_reason: String::new(),
             last_heartbeat_at: None,
@@ -129,7 +138,12 @@ pub fn load_session_manifest(session: Option<&str>) -> Result<Option<SessionMani
     let contents = match fs::read_to_string(&path) {
         Ok(contents) => contents,
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(err) => return Err(format!("failed to read session manifest {}: {err}", path.display())),
+        Err(err) => {
+            return Err(format!(
+                "failed to read session manifest {}: {err}",
+                path.display()
+            ))
+        }
     };
 
     let manifest = serde_json::from_str(&contents)
@@ -143,8 +157,12 @@ pub fn save_session_manifest(
 ) -> Result<(), String> {
     let path = manifest_path_for(session);
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|err| format!("failed to create session manifest dir {}: {err}", parent.display()))?;
+        fs::create_dir_all(parent).map_err(|err| {
+            format!(
+                "failed to create session manifest dir {}: {err}",
+                parent.display()
+            )
+        })?;
     }
     let data = serde_json::to_string_pretty(manifest)
         .map_err(|err| format!("failed to serialize session manifest: {err}"))?;

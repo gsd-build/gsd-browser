@@ -2,6 +2,7 @@ pub mod advanced;
 pub mod assert_cmd;
 pub mod auth_vault;
 pub mod batch;
+pub mod cloud;
 pub mod codegen;
 pub mod device;
 pub mod extract;

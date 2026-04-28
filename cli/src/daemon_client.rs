@@ -1,15 +1,10 @@
-use gsd_browser_common::{
-    ipc,
-    pid_path_for,
-    socket_path_for,
-    state_dir,
-    validate_session_name,
-    DaemonRequest,
-    DaemonResponse,
-};
 use gsd_browser_common::session::{
     load_session_manifest, manifest_path_for, now_epoch_secs, save_session_manifest,
     SessionHealthStatus, SessionManifest,
+};
+use gsd_browser_common::{
+    ipc, pid_path_for, socket_path_for, state_dir, validate_session_name, DaemonRequest,
+    DaemonResponse,
 };
 use serde_json::json;
 use std::fs;
@@ -127,6 +122,9 @@ pub async fn start_daemon(
     browser_path: Option<&str>,
     cdp_url: Option<&str>,
     session: Option<&str>,
+    identity_scope: Option<&str>,
+    identity_key: Option<&str>,
+    identity_project_id: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let session = validate_session_name(session)?;
 
@@ -196,6 +194,15 @@ pub async fn start_daemon(
     }
     if let Some(name) = session {
         cmd.arg("--session").arg(name);
+    }
+    if let Some(scope) = identity_scope {
+        cmd.arg("--identity-scope").arg(scope);
+    }
+    if let Some(key) = identity_key {
+        cmd.arg("--identity-key").arg(key);
+    }
+    if let Some(project_id) = identity_project_id {
+        cmd.arg("--identity-project").arg(project_id);
     }
 
     // In debug mode, inherit daemon logs so startup failures are visible.
@@ -360,7 +367,9 @@ pub fn stop_daemon(session: Option<&str>) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-pub async fn collect_health(session: Option<&str>) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+pub async fn collect_health(
+    session: Option<&str>,
+) -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let session = validate_session_name(session)?;
     let manifest = load_session_manifest(session)?;
     let pid = read_daemon_pid(session);
@@ -368,11 +377,14 @@ pub async fn collect_health(session: Option<&str>) -> Result<serde_json::Value, 
     let socket_path = socket_path_for(session);
     let socket_exists = socket_path.exists();
     let socket_connected = if socket_exists {
-        timeout(Duration::from_millis(300), UnixStream::connect(&socket_path))
-            .await
-            .ok()
-            .and_then(Result::ok)
-            .is_some()
+        timeout(
+            Duration::from_millis(300),
+            UnixStream::connect(&socket_path),
+        )
+        .await
+        .ok()
+        .and_then(Result::ok)
+        .is_some()
     } else {
         false
     };
@@ -409,7 +421,10 @@ pub async fn collect_health(session: Option<&str>) -> Result<serde_json::Value, 
             "session metadata exists but no live daemon is running".to_string(),
         )
     } else {
-        (SessionHealthStatus::Stopped, "daemon not running".to_string())
+        (
+            SessionHealthStatus::Stopped,
+            "daemon not running".to_string(),
+        )
     };
 
     manifest.health = status;
@@ -435,6 +450,9 @@ pub async fn collect_health(session: Option<&str>) -> Result<serde_json::Value, 
             "cdpUrl": manifest.cdp_url,
             "websocketUrl": manifest.websocket_url,
             "browserUserDataDir": manifest.browser_user_data_dir,
+            "identityScope": manifest.identity_scope,
+            "identityProjectId": manifest.identity_project_id,
+            "identityKey": manifest.identity_key,
             "lastHeartbeatAt": manifest.last_heartbeat_at,
             "lastUpdatedAt": manifest.last_updated_at,
             "daemonAlive": daemon_alive,
@@ -458,10 +476,21 @@ pub async fn send_request(
     session: Option<&str>,
 ) -> Result<DaemonResponse, Box<dyn std::error::Error>> {
     let session = validate_session_name(session)?;
+    let identity_scope = std::env::var("GSD_BROWSER_IDENTITY_SCOPE").ok();
+    let identity_key = std::env::var("GSD_BROWSER_IDENTITY_KEY").ok();
+    let identity_project_id = std::env::var("GSD_BROWSER_IDENTITY_PROJECT").ok();
 
     // Ensure daemon is running
     if !is_daemon_alive(session) || !socket_path_for(session).exists() {
-        start_daemon(browser_path, cdp_url, session).await?;
+        start_daemon(
+            browser_path,
+            cdp_url,
+            session,
+            identity_scope.as_deref(),
+            identity_key.as_deref(),
+            identity_project_id.as_deref(),
+        )
+        .await?;
     }
 
     // Connect and send
@@ -481,7 +510,15 @@ pub async fn send_request(
             refuse_implicit_named_session_replacement(session)?;
             eprintln!("[gsd-browser] daemon connection failed, restarting...");
             cleanup_daemon_artifacts(session);
-            start_daemon(browser_path, cdp_url, session).await?;
+            start_daemon(
+                browser_path,
+                cdp_url,
+                session,
+                identity_scope.as_deref(),
+                identity_key.as_deref(),
+                identity_project_id.as_deref(),
+            )
+            .await?;
             send_once(method, params, session).await
         }
     }

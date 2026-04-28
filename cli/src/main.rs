@@ -31,6 +31,18 @@ pub struct Cli {
     #[arg(long, global = true)]
     session: Option<String>,
 
+    /// Browser identity scope: session, project, or global
+    #[arg(long, global = true)]
+    identity_scope: Option<String>,
+
+    /// Browser identity key
+    #[arg(long, global = true)]
+    identity_key: Option<String>,
+
+    /// Project id for project-scoped browser identities
+    #[arg(long, global = true)]
+    identity_project: Option<String>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -587,6 +599,15 @@ enum Commands {
         /// Named session
         #[arg(long)]
         session: Option<String>,
+        /// Browser identity scope: session, project, or global
+        #[arg(long)]
+        identity_scope: Option<String>,
+        /// Browser identity key
+        #[arg(long)]
+        identity_key: Option<String>,
+        /// Project id for project-scoped browser identities
+        #[arg(long)]
+        identity_project: Option<String>,
     },
     /// Daemon management
     Daemon {
@@ -636,15 +657,46 @@ async fn main() {
         }
         std::process::exit(1);
     }
+    if let Some(scope) = cli.identity_scope.as_deref() {
+        if !matches!(scope, "session" | "project" | "global") {
+            eprintln!("Error: invalid identity scope: {scope}");
+            std::process::exit(1);
+        }
+        if cli.identity_key.is_none() {
+            eprintln!("Error: --identity-scope requires --identity-key");
+            std::process::exit(1);
+        }
+        if scope == "project" && cli.identity_project.is_none() {
+            eprintln!("Error: project identity requires --identity-project");
+            std::process::exit(1);
+        }
+        std::env::set_var("GSD_BROWSER_IDENTITY_SCOPE", scope);
+    }
+    if let Some(key) = cli.identity_key.as_deref() {
+        std::env::set_var("GSD_BROWSER_IDENTITY_KEY", key);
+    }
+    if let Some(project_id) = cli.identity_project.as_deref() {
+        std::env::set_var("GSD_BROWSER_IDENTITY_PROJECT", project_id);
+    }
 
     let result = match &cli.command {
         Commands::Serve {
             browser_path,
             cdp_url,
             session,
+            identity_scope,
+            identity_key,
+            identity_project,
         } => {
-            if let Err(e) =
-                daemon::run(browser_path.clone(), session.clone(), cdp_url.clone()).await
+            if let Err(e) = daemon::run(
+                browser_path.clone(),
+                session.clone(),
+                cdp_url.clone(),
+                identity_scope.clone(),
+                identity_key.clone(),
+                identity_project.clone(),
+            )
+            .await
             {
                 eprintln!("[gsd-browser-daemon] fatal: {e}");
                 std::process::exit(1);
@@ -929,6 +981,9 @@ async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
         cli.browser_path.as_deref(),
         cli.cdp_url.as_deref(),
         cli.session.as_deref(),
+        cli.identity_scope.as_deref(),
+        cli.identity_key.as_deref(),
+        cli.identity_project.as_deref(),
     )
     .await?;
     if cli.json {
