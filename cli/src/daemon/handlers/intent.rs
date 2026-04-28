@@ -415,11 +415,7 @@ pub async fn handle_find_best(page: &Page, params: &Value) -> Result<Value, Stri
 /// click it (or focus for search_field), settle, and capture state.
 ///
 /// Params: { intent: string, scope?: string }
-pub async fn handle_act(
-    page: &Page,
-    state: &DaemonState,
-    params: &Value,
-) -> Result<Value, String> {
+pub async fn handle_act(page: &Page, state: &DaemonState, params: &Value) -> Result<Value, String> {
     let intent = params
         .get("intent")
         .and_then(|v| v.as_str())
@@ -468,13 +464,11 @@ pub async fn handle_act(
             .and_then(|value| value.as_bool())
             .unwrap_or(false)
         {
-            return Err(
-                focused
-                    .get("error")
-                    .and_then(|value| value.as_str())
-                    .unwrap_or("act: focus failed")
-                    .to_string(),
-            );
+            return Err(focused
+                .get("error")
+                .and_then(|value| value.as_str())
+                .unwrap_or("act: focus failed")
+                .to_string());
         }
         action_performed = "focus";
     } else {

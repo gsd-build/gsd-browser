@@ -139,13 +139,11 @@ pub async fn handle_eval(
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
     if !ok {
-        return Err(
-            eval_result
-                .get("error")
-                .and_then(|value| value.as_str())
-                .unwrap_or("eval failed")
-                .to_string(),
-        );
+        return Err(eval_result
+            .get("error")
+            .and_then(|value| value.as_str())
+            .unwrap_or("eval failed")
+            .to_string());
     }
 
     let value = eval_result.get("value").cloned().unwrap_or(Value::Null);
@@ -338,13 +336,11 @@ pub async fn handle_page_source(
         .and_then(|value| value.as_bool())
         .unwrap_or(false);
     if !ok {
-        return Err(
-            source
-                .get("error")
-                .and_then(|value| value.as_str())
-                .unwrap_or("page_source failed")
-                .to_string(),
-        );
+        return Err(source
+            .get("error")
+            .and_then(|value| value.as_str())
+            .unwrap_or("page_source failed")
+            .to_string());
     }
     let mut html = source
         .get("html")

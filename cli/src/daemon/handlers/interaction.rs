@@ -113,15 +113,9 @@ async fn click_selector(page: &Page, state: &DaemonState, selector: &str) -> Res
         .map_err(|_| format!("click timed out at ({x}, {y})"))?
     {
         debug!("click: coordinate click failed ({err}), falling back to JS action");
-        let fallback = inspection::perform_selector_action(
-            page,
-            state,
-            selector,
-            "click",
-            &json!({}),
-            true,
-        )
-        .await?;
+        let fallback =
+            inspection::perform_selector_action(page, state, selector, "click", &json!({}), true)
+                .await?;
         if !fallback
             .get("ok")
             .and_then(|value| value.as_bool())
@@ -367,15 +361,9 @@ pub async fn handle_hover(
         .map_err(|_| format!("hover timed out for: {selector}"))?
     {
         debug!("hover: coordinate hover failed ({err}), falling back to JS action");
-        let fallback = inspection::perform_selector_action(
-            page,
-            state,
-            selector,
-            "hover",
-            &json!({}),
-            true,
-        )
-        .await?;
+        let fallback =
+            inspection::perform_selector_action(page, state, selector, "hover", &json!({}), true)
+                .await?;
         if !fallback
             .get("ok")
             .and_then(|value| value.as_bool())

@@ -12,20 +12,14 @@ use chromiumoxide::cdp::browser_protocol::page::EnableParams as PageEnableParams
 use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParams;
 use chromiumoxide::Page;
 use futures::StreamExt;
-use gsd_browser_common::{
-    config::Config,
-    ipc,
-    pid_path_for,
-    socket_path_for,
-    state_dir,
-    validate_session_name,
-    DaemonRequest,
-    DaemonResponse,
-    ERR_INTERNAL,
-    ERR_METHOD_NOT_FOUND,
-};
 use gsd_browser_common::session::{
     now_epoch_secs, save_session_manifest, session_dir_for, SessionHealthStatus, SessionManifest,
+};
+use gsd_browser_common::{
+    config::Config,
+    identity::{identity_profile_dir, IdentityScope},
+    ipc, pid_path_for, socket_path_for, state_dir, validate_session_name, DaemonRequest,
+    DaemonResponse, ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
 };
 use logs::DaemonLogs;
 use serde_json::json;
@@ -43,6 +37,9 @@ pub async fn run(
     browser_path: Option<String>,
     session: Option<String>,
     cdp_url: Option<String>,
+    identity_scope: Option<String>,
+    identity_key: Option<String>,
+    identity_project_id: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
     let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
@@ -56,7 +53,15 @@ pub async fn run(
         .with_writer(std::io::stderr)
         .init();
 
-    run_daemon(browser_path, session, cdp_url).await
+    run_daemon(
+        browser_path,
+        session,
+        cdp_url,
+        identity_scope,
+        identity_key,
+        identity_project_id,
+    )
+    .await
 }
 
 async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
@@ -82,8 +87,17 @@ async fn shutdown_signal() -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-fn browser_profile_dir(session: Option<&str>) -> PathBuf {
-    session_dir_for(session).join("browser-profile")
+fn browser_profile_dir(
+    session: Option<&str>,
+    identity_scope: Option<IdentityScope>,
+    identity_key: Option<&str>,
+    identity_project_id: Option<&str>,
+) -> Result<PathBuf, String> {
+    match (identity_scope, identity_key) {
+        (Some(scope), Some(key)) => identity_profile_dir(scope, identity_project_id, key),
+        (None, None) => Ok(session_dir_for(session).join("browser-profile")),
+        _ => Err("identity profile requires both identity scope and key".to_string()),
+    }
 }
 
 fn cleanup_browser_profile_singletons(profile_dir: &Path) {
@@ -112,6 +126,9 @@ async fn run_daemon(
     browser_path_arg: Option<String>,
     session_arg: Option<String>,
     cdp_url_arg: Option<String>,
+    identity_scope_arg: Option<String>,
+    identity_key_arg: Option<String>,
+    identity_project_id_arg: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
@@ -126,6 +143,27 @@ async fn run_daemon(
 
     let session = validate_session_name(session_arg.as_deref())
         .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+    let identity_scope = identity_scope_arg
+        .as_deref()
+        .map(IdentityScope::parse)
+        .transpose()
+        .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
+    if identity_scope.is_none() && identity_key_arg.is_some() {
+        return Err("--identity-key requires --identity-scope".into());
+    }
+    if identity_scope.is_none() && identity_project_id_arg.is_some() {
+        return Err("--identity-project requires --identity-scope".into());
+    }
+    if identity_project_id_arg.is_some() && !matches!(identity_scope, Some(IdentityScope::Project))
+    {
+        return Err("--identity-project is only valid with --identity-scope=project".into());
+    }
+    if matches!(identity_scope, Some(IdentityScope::Project)) && identity_project_id_arg.is_none() {
+        return Err("project identity requires --identity-project".into());
+    }
+    if identity_scope.is_some() && identity_key_arg.is_none() {
+        return Err("identity profile requires --identity-key".into());
+    }
 
     // Ensure state directory exists
     let state = state_dir();
@@ -197,6 +235,9 @@ async fn run_daemon(
         health: SessionHealthStatus::Starting,
         health_reason: "daemon starting".to_string(),
         last_updated_at: Some(start_ts),
+        identity_scope,
+        identity_project_id: identity_project_id_arg.clone(),
+        identity_key: identity_key_arg.clone(),
         ..SessionManifest::default()
     };
     save_session_manifest(session, &starting_manifest)
@@ -249,7 +290,13 @@ async fn run_daemon(
             chrome_path
         );
 
-        let profile_dir = browser_profile_dir(session);
+        let profile_dir = browser_profile_dir(
+            session,
+            identity_scope,
+            identity_key_arg.as_deref(),
+            identity_project_id_arg.as_deref(),
+        )
+        .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
         fs::create_dir_all(&profile_dir)?;
         cleanup_browser_profile_singletons(&profile_dir);
 
@@ -322,6 +369,9 @@ async fn run_daemon(
         websocket_url: Some(browser.websocket_address().clone()),
         browser_pid,
         browser_user_data_dir,
+        identity_scope,
+        identity_project_id: identity_project_id_arg.clone(),
+        identity_key: identity_key_arg.clone(),
         socket_path: sock_path.to_string_lossy().to_string(),
     }));
     logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
@@ -578,16 +628,55 @@ async fn dispatch(
         diff.after = Some(after_state);
     }
 
-    if response.error.is_none()
-        && !matches!(req.method.as_str(), "health" | "session_summary" | "debug_bundle")
-    {
+    if response.error.is_none() && should_sync_session_manifest(req.method.as_str()) {
         let _ = handlers::session::sync_session_manifest(page, state, None, None).await;
     }
 
     response
 }
 
-async fn dispatch_inner(
+fn should_sync_session_manifest(method: &str) -> bool {
+    matches!(
+        method,
+        "navigate"
+            | "back"
+            | "forward"
+            | "reload"
+            | "click"
+            | "type"
+            | "press"
+            | "hover"
+            | "scroll"
+            | "select_option"
+            | "set_checked"
+            | "drag"
+            | "set_viewport"
+            | "upload_file"
+            | "click_ref"
+            | "hover_ref"
+            | "fill_ref"
+            | "fill_form"
+            | "act"
+            | "batch"
+            | "cloud_tool"
+            | "cloud_user_input"
+            | "switch_page"
+            | "close_page"
+            | "select_frame"
+            | "mock_route"
+            | "block_urls"
+            | "clear_routes"
+            | "emulate_device"
+            | "save_state"
+            | "restore_state"
+            | "vault_save"
+            | "vault_login"
+            | "trace_start"
+            | "trace_stop"
+    )
+}
+
+pub(crate) async fn dispatch_inner(
     req: &DaemonRequest,
     page: &Page,
     logs: &DaemonLogs,
@@ -595,6 +684,42 @@ async fn dispatch_inner(
 ) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
+        "cloud_session_status" => {
+            match handlers::cloud::handle_cloud_session_status(page, state).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "cloud_frame" => match handlers::cloud::handle_cloud_frame(page, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "cloud_tool" => {
+            match handlers::cloud::handle_cloud_tool(page, logs, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "cloud_user_input" => {
+            match handlers::cloud::handle_cloud_user_input(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "cloud_identity_list" => match handlers::cloud::handle_cloud_identity_list(&req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "cloud_identity_save" => match handlers::cloud::handle_cloud_identity_save(&req.params) {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "cloud_identity_revoke" => {
+            match handlers::cloud::handle_cloud_identity_revoke(&req.params) {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "health" => match handlers::session::handle_health(page, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -677,10 +802,12 @@ async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "set_checked" => match handlers::interaction::handle_set_checked(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "set_checked" => {
+            match handlers::interaction::handle_set_checked(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "drag" => match handlers::interaction::handle_drag(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -714,10 +841,12 @@ async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "page_source" => match handlers::inspect::handle_page_source(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "page_source" => {
+            match handlers::inspect::handle_page_source(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "wait_for" => match handlers::wait::handle_wait_for(page, logs, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
@@ -820,10 +949,12 @@ async fn dispatch_inner(
                 json!({"retryHint": "Check intent is valid and matching elements exist on page"}),
             ),
         },
-        "session_summary" => match handlers::session::handle_session_summary(page, logs, state).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "session_summary" => {
+            match handlers::session::handle_session_summary(page, logs, state).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "debug_bundle" => {
             match handlers::session::handle_debug_bundle(page, logs, state, &req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),

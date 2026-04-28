@@ -76,7 +76,11 @@ fn lookup_ref_node(state: &DaemonState, ref_str: &str) -> Result<(u64, String, V
     Ok((version, key, node))
 }
 
-async fn resolve_ref(page: &Page, state: &DaemonState, ref_str: &str) -> Result<(Value, Value), String> {
+async fn resolve_ref(
+    page: &Page,
+    state: &DaemonState,
+    ref_str: &str,
+) -> Result<(Value, Value), String> {
     let (_version, _key, node) = lookup_ref_node(state, ref_str)?;
     let resolution = inspection::resolve_snapshot_node(page, &node).await?;
     let ok = resolution
@@ -117,10 +121,14 @@ pub async fn handle_snapshot(
         .get("interactive_only")
         .and_then(|value| value.as_bool())
         .unwrap_or(true);
-    let limit = params.get("limit").and_then(|value| value.as_u64()).unwrap_or(40) as u32;
+    let limit = params
+        .get("limit")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(40) as u32;
     let mode = params.get("mode").and_then(|value| value.as_str());
 
-    let snapshot = inspection::snapshot_elements(page, state, selector, interactive_only, limit, mode).await?;
+    let snapshot =
+        inspection::snapshot_elements(page, state, selector, interactive_only, limit, mode).await?;
     let ok = snapshot
         .get("ok")
         .and_then(|value| value.as_bool())
@@ -147,7 +155,10 @@ pub async fn handle_snapshot(
     let (version, count) = {
         let mut store = state.refs.lock().unwrap();
         store.version += 1;
-        store.refs = refs.iter().map(|(key, value)| (key.clone(), value.clone())).collect();
+        store.refs = refs
+            .iter()
+            .map(|(key, value)| (key.clone(), value.clone()))
+            .collect();
         store.metadata = json!({
             "interactive_only": interactive_only,
             "limit": limit,

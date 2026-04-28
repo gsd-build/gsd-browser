@@ -207,6 +207,9 @@ pub struct SessionRuntime {
     pub websocket_url: Option<String>,
     pub browser_pid: Option<u32>,
     pub browser_user_data_dir: Option<String>,
+    pub identity_scope: Option<gsd_browser_common::identity::IdentityScope>,
+    pub identity_project_id: Option<String>,
+    pub identity_key: Option<String>,
     pub socket_path: String,
 }
 

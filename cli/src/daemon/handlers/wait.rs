@@ -59,7 +59,8 @@ pub async fn handle_wait_for(
                     .and_then(|result| result.get("first").cloned())
                     .and_then(|first| first.get("visible").and_then(|visible| visible.as_bool()))
                     .unwrap_or(false)
-            }).await
+            })
+            .await
         }
         "selector_hidden" => {
             poll_until(deadline, poll_interval, || async {
@@ -75,17 +76,24 @@ pub async fn handle_wait_for(
                     }
                     Err(_) => false,
                 }
-            }).await
+            })
+            .await
         }
         "url_contains" => {
             poll_until(deadline, poll_interval, || async {
                 inspection::target_url(page, state)
                     .await
                     .ok()
-                    .and_then(|result| result.get("url").and_then(|url| url.as_str()).map(str::to_string))
+                    .and_then(|result| {
+                        result
+                            .get("url")
+                            .and_then(|url| url.as_str())
+                            .map(str::to_string)
+                    })
                     .map(|url| url.contains(value))
                     .unwrap_or(false)
-            }).await
+            })
+            .await
         }
         "text_visible" => {
             poll_until(deadline, poll_interval, || async {
@@ -94,7 +102,8 @@ pub async fn handle_wait_for(
                     .ok()
                     .and_then(|result| result.get("found").and_then(|found| found.as_bool()))
                     .unwrap_or(false)
-            }).await
+            })
+            .await
         }
         "text_hidden" => {
             poll_until(deadline, poll_interval, || async {
@@ -103,7 +112,8 @@ pub async fn handle_wait_for(
                     .ok()
                     .and_then(|result| result.get("found").and_then(|found| found.as_bool()))
                     .unwrap_or(false)
-            }).await
+            })
+            .await
         }
         "network_idle" => {
             // Wait until no new network entries appear within a 500ms window
@@ -129,13 +139,15 @@ pub async fn handle_wait_for(
             poll_until(deadline, poll_interval, || async {
                 let entries = logs.network.snapshot();
                 entries.iter().any(|e| e.url.contains(value))
-            }).await
+            })
+            .await
         }
         "console_message" => {
             poll_until(deadline, poll_interval, || async {
                 let entries = logs.console.snapshot();
                 entries.iter().any(|e| e.text.contains(value))
-            }).await
+            })
+            .await
         }
         "element_count" => {
             let (op, target) = parse_threshold(threshold);
@@ -147,7 +159,8 @@ pub async fn handle_wait_for(
                     .and_then(|result| result.get("count").and_then(|count| count.as_u64()))
                     .unwrap_or(0);
                 compare_threshold(count, &op, target)
-            }).await
+            })
+            .await
         }
         "region_stable" => {
             // Poll innerHTML hash; require 2 consecutive identical hashes
@@ -157,7 +170,12 @@ pub async fn handle_wait_for(
                 let html = inspection::region_signature(page, state, value)
                     .await
                     .ok()
-                    .and_then(|result| result.get("html").and_then(|html| html.as_str()).map(str::to_string))
+                    .and_then(|result| {
+                        result
+                            .get("html")
+                            .and_then(|html| html.as_str())
+                            .map(str::to_string)
+                    })
                     .unwrap_or_default();
                 let mut hasher = DefaultHasher::new();
                 html.hash(&mut hasher);
