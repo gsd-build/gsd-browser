@@ -642,47 +642,31 @@ async fn main() {
         cli.cdp_url = config.browser.cdp_url.clone();
     }
     if let Err(err) = validate_session_name(cli.session.as_deref()) {
-        if cli.json {
-            eprintln!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "error": {
-                        "message": err,
-                    }
-                }))
-                .unwrap()
-            );
-        } else {
-            eprintln!("Error: {err}");
-        }
-        std::process::exit(1);
+        exit_with_validation_error(&cli, err);
     }
     if let Some(scope) = cli.identity_scope.as_deref() {
         if !matches!(scope, "session" | "project" | "global") {
-            eprintln!("Error: invalid identity scope: {scope}");
-            std::process::exit(1);
+            exit_with_validation_error(&cli, format!("invalid identity scope: {scope}"));
         }
         if cli.identity_key.is_none() {
-            eprintln!("Error: --identity-scope requires --identity-key");
-            std::process::exit(1);
+            exit_with_validation_error(&cli, "--identity-scope requires --identity-key");
         }
         if scope == "project" && cli.identity_project.is_none() {
-            eprintln!("Error: project identity requires --identity-project");
-            std::process::exit(1);
+            exit_with_validation_error(&cli, "project identity requires --identity-project");
         }
         if scope != "project" && cli.identity_project.is_some() {
-            eprintln!("Error: --identity-project is only valid with --identity-scope=project");
-            std::process::exit(1);
+            exit_with_validation_error(
+                &cli,
+                "--identity-project is only valid with --identity-scope=project",
+            );
         }
         std::env::set_var("GSD_BROWSER_IDENTITY_SCOPE", scope);
     } else {
         if cli.identity_key.is_some() {
-            eprintln!("Error: --identity-key requires --identity-scope");
-            std::process::exit(1);
+            exit_with_validation_error(&cli, "--identity-key requires --identity-scope");
         }
         if cli.identity_project.is_some() {
-            eprintln!("Error: --identity-project requires --identity-scope");
-            std::process::exit(1);
+            exit_with_validation_error(&cli, "--identity-project requires --identity-scope");
         }
     }
     if let Some(key) = cli.identity_key.as_deref() {
@@ -988,6 +972,24 @@ async fn main() {
 }
 
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
+
+fn exit_with_validation_error(cli: &Cli, message: impl Into<String>) -> ! {
+    let message = message.into();
+    if cli.json {
+        eprintln!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "error": {
+                    "message": message,
+                }
+            }))
+            .unwrap()
+        );
+    } else {
+        eprintln!("Error: {message}");
+    }
+    std::process::exit(1);
+}
 
 async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
     daemon_client::start_daemon(
