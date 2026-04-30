@@ -7,6 +7,7 @@ pub mod settle;
 pub mod state;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
 use chromiumoxide::cdp::browser_protocol::network::EnableParams as NetworkEnableParams;
 use chromiumoxide::cdp::browser_protocol::page::EnableParams as PageEnableParams;
 use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParams;
@@ -30,6 +31,9 @@ use std::process;
 use std::sync::Arc;
 use tokio::net::UnixListener;
 use tracing::{debug, error, info, warn};
+
+const DEFAULT_VIEWPORT_WIDTH: i64 = 1920;
+const DEFAULT_VIEWPORT_HEIGHT: i64 = 1080;
 
 /// Entry point for the daemon server. Called when the binary is invoked
 /// with the hidden `_daemon` subcommand.
@@ -120,6 +124,23 @@ fn cleanup_browser_profile_singletons(profile_dir: &Path) {
             );
         }
     }
+}
+
+async fn set_default_viewport(page: &Page) {
+    let params = SetDeviceMetricsOverrideParams::new(
+        DEFAULT_VIEWPORT_WIDTH,
+        DEFAULT_VIEWPORT_HEIGHT,
+        1.0,
+        false,
+    );
+    if let Err(err) = page.execute(params).await {
+        warn!("[gsd-browser-daemon] default viewport override failed (non-fatal): {err}");
+        return;
+    }
+    info!(
+        "[gsd-browser-daemon] default viewport set to {}x{}",
+        DEFAULT_VIEWPORT_WIDTH, DEFAULT_VIEWPORT_HEIGHT
+    );
 }
 
 async fn run_daemon(
@@ -328,6 +349,9 @@ async fn run_daemon(
 
     // Create initial page
     let page = browser.new_page("about:blank").await?;
+    if effective_cdp_url.is_none() {
+        set_default_viewport(&page).await;
+    }
     info!("[gsd-browser-daemon] initial page created");
 
     // Inject browser-side helpers and install mutation counter
