@@ -75,7 +75,11 @@ async fn viewport_center(page: &Page) -> (f64, f64) {
     )
 }
 
-async fn viewport_metrics(page: &Page) -> ViewportMetrics {
+async fn viewport_metrics(
+    page: &Page,
+    fallback_width: u32,
+    fallback_height: u32,
+) -> ViewportMetrics {
     let value = page
         .evaluate_expression(
             r#"(() => ({
@@ -89,15 +93,18 @@ async fn viewport_metrics(page: &Page) -> ViewportMetrics {
         .and_then(|result| result.into_value().ok())
         .unwrap_or_else(|| json!({}));
 
+    let width = value
+        .get("width")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as u32;
+    let height = value
+        .get("height")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as u32;
+
     ViewportMetrics {
-        width: value
-            .get("width")
-            .and_then(Value::as_u64)
-            .unwrap_or_default() as u32,
-        height: value
-            .get("height")
-            .and_then(Value::as_u64)
-            .unwrap_or_default() as u32,
+        width: if width == 0 { fallback_width } else { width },
+        height: if height == 0 { fallback_height } else { height },
         device_pixel_ratio: value
             .get("devicePixelRatio")
             .and_then(Value::as_f64)
@@ -158,6 +165,15 @@ fn mouse_buttons_mask(button: &MouseButton) -> i64 {
         MouseButton::Middle => 4,
         MouseButton::Back => 8,
         MouseButton::Forward => 16,
+    }
+}
+
+fn validate_coordinate_space(coordinate_space: Option<&str>) -> Result<(), String> {
+    match coordinate_space {
+        None | Some("") => Ok(()),
+        Some("viewport") | Some("viewport_css_pixels") | Some("viewport-css-px") => Ok(()),
+        Some("frame_css_pixels") => Ok(()),
+        Some(other) => Err(format!("unsupported coordinate space: {other}")),
     }
 }
 
@@ -342,7 +358,7 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
             height = decoded_height;
         }
     }
-    let viewport = viewport_metrics(page).await;
+    let viewport = viewport_metrics(page, width, height).await;
     let frame = CloudFrame {
         sequence: FRAME_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         content_type: "image/jpeg".to_string(),
@@ -400,6 +416,7 @@ pub async fn handle_cloud_user_input(
 ) -> Result<Value, String> {
     let input: CloudUserInput =
         serde_json::from_value(params.clone()).map_err(|err| err.to_string())?;
+    validate_coordinate_space(input.coordinate_space.as_deref())?;
     let modifiers = modifier_mask(input.modifiers.as_deref())?;
 
     match input.kind.as_str() {
