@@ -1,7 +1,7 @@
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use chromiumoxide::cdp::browser_protocol::input::{
-    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
-    InsertTextParams,
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams,
+    DispatchMouseEventPointerType, DispatchMouseEventType, InsertTextParams, MouseButton,
 };
 use chromiumoxide::keys;
 use chromiumoxide::Page;
@@ -21,6 +21,13 @@ use crate::daemon::{handlers, logs::DaemonLogs, state::DaemonState};
 
 static FRAME_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, Copy)]
+struct ViewportMetrics {
+    width: u32,
+    height: u32,
+    device_pixel_ratio: f64,
+}
 
 fn now_ms() -> u64 {
     SystemTime::now()
@@ -68,6 +75,43 @@ async fn viewport_center(page: &Page) -> (f64, f64) {
     )
 }
 
+async fn viewport_metrics(
+    page: &Page,
+    fallback_width: u32,
+    fallback_height: u32,
+) -> ViewportMetrics {
+    let value = page
+        .evaluate_expression(
+            r#"(() => ({
+                width: Math.max(0, Math.round(window.innerWidth || 0)),
+                height: Math.max(0, Math.round(window.innerHeight || 0)),
+                devicePixelRatio: Number(window.devicePixelRatio || 1)
+            }))()"#,
+        )
+        .await
+        .ok()
+        .and_then(|result| result.into_value().ok())
+        .unwrap_or_else(|| json!({}));
+
+    let width = value
+        .get("width")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as u32;
+    let height = value
+        .get("height")
+        .and_then(Value::as_u64)
+        .unwrap_or_default() as u32;
+
+    ViewportMetrics {
+        width: if width == 0 { fallback_width } else { width },
+        height: if height == 0 { fallback_height } else { height },
+        device_pixel_ratio: value
+            .get("devicePixelRatio")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0),
+    }
+}
+
 async fn scroll_info(page: &Page) -> Value {
     page.evaluate_expression(
         r#"(() => ({
@@ -81,6 +125,140 @@ async fn scroll_info(page: &Page) -> Value {
     .ok()
     .and_then(|result| result.into_value().ok())
     .unwrap_or_else(|| json!({}))
+}
+
+fn modifier_mask(modifiers: Option<&[String]>) -> Result<i64, String> {
+    let Some(modifiers) = modifiers else {
+        return Ok(0);
+    };
+
+    let mut mask = 0;
+    for modifier in modifiers {
+        match modifier.to_ascii_lowercase().as_str() {
+            "alt" | "option" => mask |= 1,
+            "control" | "ctrl" => mask |= 2,
+            "meta" | "command" | "cmd" => mask |= 4,
+            "shift" => mask |= 8,
+            other => return Err(format!("unsupported modifier: {other}")),
+        }
+    }
+    Ok(mask)
+}
+
+fn mouse_button(button: Option<&str>) -> Result<MouseButton, String> {
+    match button.unwrap_or("left").to_ascii_lowercase().as_str() {
+        "none" => Ok(MouseButton::None),
+        "left" => Ok(MouseButton::Left),
+        "middle" => Ok(MouseButton::Middle),
+        "right" => Ok(MouseButton::Right),
+        "back" => Ok(MouseButton::Back),
+        "forward" => Ok(MouseButton::Forward),
+        other => Err(format!("unsupported mouse button: {other}")),
+    }
+}
+
+fn mouse_buttons_mask(button: &MouseButton) -> i64 {
+    match button {
+        MouseButton::None => 0,
+        MouseButton::Left => 1,
+        MouseButton::Right => 2,
+        MouseButton::Middle => 4,
+        MouseButton::Back => 8,
+        MouseButton::Forward => 16,
+    }
+}
+
+fn validate_coordinate_space(coordinate_space: Option<&str>) -> Result<(), String> {
+    match coordinate_space {
+        None | Some("") => Ok(()),
+        Some("viewport") | Some("viewport_css_pixels") | Some("viewport-css-px") => Ok(()),
+        Some("frame_css_pixels") => Ok(()),
+        Some(other) => Err(format!("unsupported coordinate space: {other}")),
+    }
+}
+
+async fn dispatch_mouse(
+    page: &Page,
+    event_type: DispatchMouseEventType,
+    x: f64,
+    y: f64,
+    button: MouseButton,
+    buttons: i64,
+    click_count: i64,
+    modifiers: i64,
+    delta_x: Option<f64>,
+    delta_y: Option<f64>,
+) -> Result<(), String> {
+    let mut params = DispatchMouseEventParams::builder()
+        .r#type(event_type)
+        .x(x)
+        .y(y)
+        .button(button)
+        .buttons(buttons)
+        .click_count(click_count)
+        .modifiers(modifiers)
+        .pointer_type(DispatchMouseEventPointerType::Mouse);
+
+    if let Some(delta_x) = delta_x {
+        params = params.delta_x(delta_x);
+    }
+    if let Some(delta_y) = delta_y {
+        params = params.delta_y(delta_y);
+    }
+
+    let params = params.build().map_err(|err| err.to_string())?;
+    timeout(INPUT_TIMEOUT, page.execute(params))
+        .await
+        .map_err(|_| "mouse input timed out".to_string())?
+        .map_err(|err| format!("mouse input failed: {err}"))?;
+    Ok(())
+}
+
+fn key_event_params(
+    key: &str,
+    event_type: DispatchKeyEventType,
+    modifiers: i64,
+) -> Result<DispatchKeyEventParams, String> {
+    let mut command = DispatchKeyEventParams::builder()
+        .r#type(event_type.clone())
+        .modifiers(modifiers);
+
+    if let Some(key_definition) = keys::get_key_definition(key) {
+        command = command
+            .key(key_definition.key)
+            .code(key_definition.code)
+            .windows_virtual_key_code(key_definition.key_code)
+            .native_virtual_key_code(key_definition.key_code);
+
+        if matches!(event_type, DispatchKeyEventType::KeyDown) {
+            if let Some(text) = key_definition.text {
+                command = command.text(text);
+            } else if key_definition.key.len() == 1 {
+                command = command.text(key_definition.key);
+            }
+        }
+    } else {
+        command = command.key(key).code(key);
+        if matches!(event_type, DispatchKeyEventType::KeyDown) && key.chars().count() == 1 {
+            command = command.text(key);
+        }
+    }
+
+    command.build().map_err(|err| err.to_string())
+}
+
+async fn dispatch_key(
+    page: &Page,
+    key: &str,
+    event_type: DispatchKeyEventType,
+    modifiers: i64,
+) -> Result<(), String> {
+    let event = key_event_params(key, event_type.clone(), modifiers)?;
+    timeout(INPUT_TIMEOUT, page.execute(event))
+        .await
+        .map_err(|_| "key input timed out".to_string())?
+        .map_err(|err| format!("key input failed: {err}"))?;
+    Ok(())
 }
 
 async fn dispatch_text(page: &Page, text: &str) -> Result<(), String> {
@@ -180,12 +358,16 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
             height = decoded_height;
         }
     }
+    let viewport = viewport_metrics(page, width, height).await;
     let frame = CloudFrame {
         sequence: FRAME_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         content_type: "image/jpeg".to_string(),
         data_base64: data,
         width,
         height,
+        viewport_width: viewport.width,
+        viewport_height: viewport.height,
+        device_pixel_ratio: viewport.device_pixel_ratio,
         captured_at_ms: now_ms(),
         url: page_url(page).await,
         title: page_title(page).await,
@@ -229,27 +411,142 @@ pub async fn handle_cloud_tool(
 
 pub async fn handle_cloud_user_input(
     page: &Page,
-    state: &DaemonState,
+    _state: &DaemonState,
     params: &Value,
 ) -> Result<Value, String> {
     let input: CloudUserInput =
         serde_json::from_value(params.clone()).map_err(|err| err.to_string())?;
+    validate_coordinate_space(input.coordinate_space.as_deref())?;
+    let modifiers = modifier_mask(input.modifiers.as_deref())?;
+
     match input.kind.as_str() {
         "click" => {
             let x = input.x.ok_or("click requires x")?;
             let y = input.y.ok_or("click requires y")?;
-            handlers::interaction::handle_click(page, state, &json!({"x": x, "y": y})).await
+            let button = mouse_button(input.button.as_deref())?;
+            let buttons = mouse_buttons_mask(&button);
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MouseMoved,
+                x,
+                y,
+                MouseButton::None,
+                0,
+                0,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MousePressed,
+                x,
+                y,
+                button.clone(),
+                buttons,
+                1,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MouseReleased,
+                x,
+                y,
+                button,
+                0,
+                1,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            Ok(json!({ "clicked": { "x": x, "y": y } }))
+        }
+        "pointer_move" => {
+            let x = input.x.ok_or("pointer_move requires x")?;
+            let y = input.y.ok_or("pointer_move requires y")?;
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MouseMoved,
+                x,
+                y,
+                MouseButton::None,
+                0,
+                0,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            Ok(json!({ "pointer": { "kind": "pointer_move", "x": x, "y": y } }))
+        }
+        "pointer_down" => {
+            let x = input.x.ok_or("pointer_down requires x")?;
+            let y = input.y.ok_or("pointer_down requires y")?;
+            let button = mouse_button(input.button.as_deref())?;
+            let buttons = mouse_buttons_mask(&button);
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MousePressed,
+                x,
+                y,
+                button,
+                buttons,
+                1,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            Ok(json!({ "pointer": { "kind": "pointer_down", "x": x, "y": y } }))
+        }
+        "pointer_up" => {
+            let x = input.x.ok_or("pointer_up requires x")?;
+            let y = input.y.ok_or("pointer_up requires y")?;
+            let button = mouse_button(input.button.as_deref())?;
+            dispatch_mouse(
+                page,
+                DispatchMouseEventType::MouseReleased,
+                x,
+                y,
+                button,
+                0,
+                1,
+                modifiers,
+                None,
+                None,
+            )
+            .await?;
+            Ok(json!({ "pointer": { "kind": "pointer_up", "x": x, "y": y } }))
+        }
+        "key_down" => {
+            let key = input.key.ok_or("key_down requires key")?;
+            dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?;
+            Ok(json!({ "key": { "kind": "key_down", "key": key } }))
+        }
+        "key_up" => {
+            let key = input.key.ok_or("key_up requires key")?;
+            dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?;
+            Ok(json!({ "key": { "kind": "key_up", "key": key } }))
         }
         "press" => {
             let key = input.key.ok_or("press requires key")?;
-            handlers::interaction::handle_press(page, &json!({"key": key})).await
+            dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?;
+            dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?;
+            Ok(json!({ "pressed": key }))
         }
-        "type" => {
-            let text = input.text.ok_or("type requires text")?;
+        "text" | "type" => {
+            let text = input
+                .text
+                .ok_or_else(|| format!("{} requires text", input.kind))?;
             timeout(INPUT_TIMEOUT, dispatch_text(page, &text))
                 .await
-                .map_err(|_| "type timed out".to_string())?
-                .map_err(|err| format!("type failed: {err}"))?;
+                .map_err(|_| "text timed out".to_string())?
+                .map_err(|err| format!("text failed: {err}"))?;
             Ok(json!({ "typed": text.len() }))
         }
         "wheel" => {
@@ -264,6 +561,10 @@ pub async fn handle_cloud_user_input(
                 .y(y)
                 .delta_x(delta_x)
                 .delta_y(delta_y)
+                .button(MouseButton::None)
+                .buttons(0)
+                .modifiers(modifiers)
+                .pointer_type(DispatchMouseEventPointerType::Mouse)
                 .build()
                 .map_err(|err| err.to_string())?;
             timeout(INPUT_TIMEOUT, page.execute(params))
