@@ -42,6 +42,7 @@ async fn handle_socket(mut socket: WebSocket, state: ViewState) {
 
     let mut rx = state.narrator.subscribe();
     let mut frames_rx = state.frames.subscribe();
+    let mut refs_rx = state.refs.subscribe();
 
     loop {
         tokio::select! {
@@ -62,6 +63,19 @@ async fn handle_socket(mut socket: WebSocket, state: ViewState) {
                 match ev {
                     Ok(frame) => {
                         if let Ok(json) = serde_json::to_string(&frame) {
+                            if socket.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
+                    Err(RecvError::Lagged(_)) => {}
+                    Err(RecvError::Closed) => break,
+                }
+            }
+            ev = refs_rx.recv() => {
+                match ev {
+                    Ok(refs) => {
+                        if let Ok(json) = serde_json::to_string(&refs) {
                             if socket.send(Message::Text(json.into())).await.is_err() {
                                 break;
                             }

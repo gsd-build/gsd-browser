@@ -1,9 +1,10 @@
 use chromiumoxide::cdp::browser_protocol::target::EventTargetCreated;
 use chromiumoxide::Browser;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
-pub async fn run_target_follow(browser: Arc<Browser>) {
-    let mut events = match browser.event_listener::<EventTargetCreated>().await {
+pub async fn run_target_follow(browser: Arc<Mutex<Browser>>) {
+    let mut events = match browser.lock().await.event_listener::<EventTargetCreated>().await {
         Ok(s) => s,
         Err(e) => {
             tracing::warn!("[view] target-follow subscribe failed: {e}");

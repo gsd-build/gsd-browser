@@ -48,3 +48,25 @@ pub async fn handle_view_status(state: &DaemonState) -> Result<Value, String> {
         "control": control,
     }))
 }
+
+pub async fn handle_view(
+    state: &DaemonState,
+    page: &chromiumoxide::Page,
+    browser: &std::sync::Arc<tokio::sync::Mutex<chromiumoxide::Browser>>,
+) -> Result<Value, String> {
+    let mut guard = state.view_server.lock().await;
+    if let Some(handle) = guard.as_ref() {
+        return Ok(json!({"url": handle.url, "port": handle.port, "started": false}));
+    }
+
+    let handle = crate::daemon::view::start_for_session(
+        state.narrator.clone(),
+        std::sync::Arc::new(page.clone()),
+        browser.clone(),
+    )
+    .await?;
+    let url = handle.url.clone();
+    let port = handle.port;
+    *guard = Some(handle);
+    Ok(json!({"url": url, "port": port, "started": true}))
+}

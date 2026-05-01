@@ -269,7 +269,7 @@ async fn run_daemon(
     save_session_manifest(session, &starting_manifest)
         .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
 
-    let (mut browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
+    let (browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
         // Connect to an already-running Chrome instance via CDP
         info!(
             "[gsd-browser-daemon] connecting to existing Chrome at {}",
@@ -351,9 +351,10 @@ async fn run_daemon(
             }
         }
     });
+    let browser = Arc::new(tokio::sync::Mutex::new(browser));
 
     // Create initial page
-    let page = browser.new_page("about:blank").await?;
+    let page = browser.lock().await.new_page("about:blank").await?;
     if effective_cdp_url.is_none() {
         set_default_viewport(&page).await;
     }
@@ -384,19 +385,24 @@ async fn run_daemon(
 
     // Create log buffers and spawn event listeners
     let daemon_logs = Arc::new(DaemonLogs::new());
-    let browser_pid = browser
-        .get_mut_child()
-        .and_then(|child| child.as_mut_inner().id());
-    let browser_user_data_dir = browser
-        .config()
-        .and_then(|cfg| cfg.user_data_dir.as_ref())
-        .map(|path| path.display().to_string());
+    let (browser_pid, browser_user_data_dir, websocket_url) = {
+        let mut browser_guard = browser.lock().await;
+        let browser_pid = browser_guard
+            .get_mut_child()
+            .and_then(|child| child.as_mut_inner().id());
+        let browser_user_data_dir = browser_guard
+            .config()
+            .and_then(|cfg| cfg.user_data_dir.as_ref())
+            .map(|path| path.display().to_string());
+        let websocket_url = browser_guard.websocket_address().clone();
+        (browser_pid, browser_user_data_dir, websocket_url)
+    };
     let daemon_state = Arc::new(DaemonState::new_with_session_and_options(
         SessionRuntime {
             session_name: session.map(str::to_string),
             launch_mode: launch_mode.clone(),
             cdp_url: effective_cdp_url.clone(),
-            websocket_url: Some(browser.websocket_address().clone()),
+            websocket_url: Some(websocket_url),
             browser_pid,
             browser_user_data_dir,
             identity_scope,
@@ -448,7 +454,8 @@ async fn run_daemon(
                         info!("[gsd-browser-daemon] connection accepted");
                         let logs = Arc::clone(&daemon_logs);
                         let state = Arc::clone(&daemon_state);
-                        tokio::spawn(handle_connection(stream, logs, state));
+                        let browser = Arc::clone(&browser);
+                        tokio::spawn(handle_connection(stream, logs, state, browser));
                     }
                     Err(e) => {
                         error!("[gsd-browser-daemon] accept error: {e}");
@@ -475,8 +482,11 @@ async fn run_daemon(
         let _ = handlers::session::mark_session_stopped(&daemon_state, "daemon stopped").await;
     }
     drop(listener);
-    let _ = browser.close().await;
-    let _ = browser.wait().await;
+    {
+        let mut browser = browser.lock().await;
+        let _ = browser.close().await;
+        let _ = browser.wait().await;
+    }
     handler_task.abort();
     let _ = fs::remove_file(&sock_path);
     let _ = fs::remove_file(&pid_file_path);
@@ -489,6 +499,7 @@ async fn handle_connection(
     mut stream: tokio::net::UnixStream,
     logs: Arc<DaemonLogs>,
     state: Arc<DaemonState>,
+    browser: Arc<tokio::sync::Mutex<Browser>>,
 ) {
     let raw = match ipc::read_message(&mut stream).await {
         Ok(data) if data.is_empty() => return,
@@ -521,7 +532,7 @@ async fn handle_connection(
     };
 
     let response = match page {
-        Some(page) => dispatch(&request, &page, &logs, &state).await,
+        Some(page) => dispatch(&request, &page, &logs, &state, &browser).await,
         None => DaemonResponse::error(
             request.id,
             ERR_INTERNAL,
@@ -540,6 +551,7 @@ async fn dispatch(
     page: &Page,
     logs: &DaemonLogs,
     state: &DaemonState,
+    browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     // Determine if this method should be timeline-recorded
     let record_timeline = matches!(
@@ -614,7 +626,7 @@ async fn dispatch(
         diff.before = Some(before_state);
     }
 
-    let response = dispatch_inner(req, page, logs, state).await;
+    let response = dispatch_inner(req, page, logs, state, browser).await;
 
     // Finish action in timeline
     if let Some(id) = action_id {
@@ -713,6 +725,7 @@ pub(crate) async fn dispatch_inner(
     page: &Page,
     logs: &DaemonLogs,
     state: &DaemonState,
+    browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
@@ -777,6 +790,10 @@ pub(crate) async fn dispatch_inner(
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
         "view_status" => match handlers::narration_cmds::handle_view_status(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "view" => match handlers::narration_cmds::handle_view(state, page, browser).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },

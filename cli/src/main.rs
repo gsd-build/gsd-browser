@@ -417,6 +417,12 @@ enum Commands {
     Step,
     /// Abort the next action
     Abort,
+    /// Open the live viewer for this session
+    View {
+        /// Print the URL without opening it
+        #[arg(long)]
+        print_only: bool,
+    },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
     /// Capture a debug bundle (screenshot, logs, timeline, accessibility tree)
@@ -869,6 +875,7 @@ async fn main() {
         Commands::Resume => cmd_control(&cli, "resume").await,
         Commands::Step => cmd_control(&cli, "step").await,
         Commands::Abort => cmd_control(&cli, "abort").await,
+        Commands::View { print_only } => cmd_view(&cli, *print_only).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
         Commands::VisualDiff {
@@ -1809,6 +1816,52 @@ async fn cmd_control(cli: &Cli, method: &str) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, format_text_control)
+}
+
+async fn cmd_view(cli: &Cli, print_only: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "view",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    if let Some(err) = resp.error {
+        if cli.json {
+            eprintln!("{}", output::format_error_json(&err));
+        } else {
+            eprintln!("{}", output::format_error_text(&err));
+        }
+        std::process::exit(1);
+    }
+    let result = resp.result.ok_or("view response missing result")?;
+    let url = result
+        .get("url")
+        .and_then(|value| value.as_str())
+        .ok_or("view response missing url")?;
+    if cli.json {
+        println!("{}", output::format_json(&result));
+    } else {
+        println!("{url}");
+    }
+    if !print_only {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "xdg-open"
+        };
+        let mut command = std::process::Command::new(opener);
+        if cfg!(target_os = "windows") {
+            command.args(["/C", "start", "", url]);
+        } else {
+            command.arg(url);
+        }
+        let _ = command.spawn();
+    }
+    Ok(())
 }
 
 fn format_text_goal(value: &serde_json::Value) -> String {

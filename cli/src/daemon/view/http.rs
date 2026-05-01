@@ -15,6 +15,7 @@ use std::sync::Arc;
 pub struct ViewState {
     pub narrator: Arc<Narrator>,
     pub frames: tokio::sync::broadcast::Sender<crate::daemon::view::capture::FrameMessage>,
+    pub refs: tokio::sync::broadcast::Sender<crate::daemon::view::refs_poller::RefsMessage>,
 }
 
 #[derive(Serialize)]
