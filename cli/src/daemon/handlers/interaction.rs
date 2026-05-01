@@ -399,55 +399,71 @@ pub async fn handle_hover(
 
     debug!("hover: selector={selector}");
 
-    let resolved = inspection::resolve_selector_target(page, state, selector, true).await?;
-    if !resolved
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        return Err(selector_action_error(
-            &resolved,
-            &format!("element not found: {selector}"),
-        ));
-    }
+    with_narration(
+        page,
+        state,
+        ActionKind::Hover,
+        Some(selector),
+        Some(selector),
+        || async {
+            let resolved = inspection::resolve_selector_target(page, state, selector, true).await?;
+            if !resolved
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(selector_action_error(
+                    &resolved,
+                    &format!("element not found: {selector}"),
+                ));
+            }
 
-    let center = resolved.get("center").cloned().unwrap_or_else(|| json!({}));
-    let x = center
-        .get("x")
-        .and_then(|value| value.as_f64())
-        .ok_or_else(|| format!("hover target has no x coordinate: {selector}"))?;
-    let y = center
-        .get("y")
-        .and_then(|value| value.as_f64())
-        .ok_or_else(|| format!("hover target has no y coordinate: {selector}"))?;
+            let center = resolved.get("center").cloned().unwrap_or_else(|| json!({}));
+            let x = center
+                .get("x")
+                .and_then(|value| value.as_f64())
+                .ok_or_else(|| format!("hover target has no x coordinate: {selector}"))?;
+            let y = center
+                .get("y")
+                .and_then(|value| value.as_f64())
+                .ok_or_else(|| format!("hover target has no y coordinate: {selector}"))?;
 
-    if let Err(err) = timeout(CDP_TIMEOUT, page.move_mouse(Point::new(x, y)))
-        .await
-        .map_err(|_| format!("hover timed out for: {selector}"))?
-    {
-        debug!("hover: coordinate hover failed ({err}), falling back to JS action");
-        let fallback =
-            inspection::perform_selector_action(page, state, selector, "hover", &json!({}), true)
+            if let Err(err) = timeout(CDP_TIMEOUT, page.move_mouse(Point::new(x, y)))
+                .await
+                .map_err(|_| format!("hover timed out for: {selector}"))?
+            {
+                debug!("hover: coordinate hover failed ({err}), falling back to JS action");
+                let fallback = inspection::perform_selector_action(
+                    page,
+                    state,
+                    selector,
+                    "hover",
+                    &json!({}),
+                    true,
+                )
                 .await?;
-        if !fallback
-            .get("ok")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
-        {
-            return Err(selector_action_error(
-                &fallback,
-                &format!("hover failed for {selector}"),
-            ));
-        }
-    }
+                if !fallback
+                    .get("ok")
+                    .and_then(|value| value.as_bool())
+                    .unwrap_or(false)
+                {
+                    return Err(selector_action_error(
+                        &fallback,
+                        &format!("hover failed for {selector}"),
+                    ));
+                }
+            }
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "hovered": selector_action_meta(selector, &resolved),
-        "boundaries": resolved.get("boundaries").cloned().unwrap_or(json!([])),
-    }))
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "hovered": selector_action_meta(selector, &resolved),
+                "boundaries": resolved.get("boundaries").cloned().unwrap_or(json!([])),
+            }))
+        },
+    )
+    .await
 }
 
 // ── Scroll ──
