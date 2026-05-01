@@ -37,8 +37,17 @@ fn cloud_frame_contract_includes_viewport_metadata() {
         height: 720,
         viewport_width: 640,
         viewport_height: 360,
+        viewport_css_width: 640,
+        viewport_css_height: 360,
+        capture_pixel_width: 1280,
+        capture_pixel_height: 720,
         device_pixel_ratio: 2.0,
+        capture_scale_x: 2.0,
+        capture_scale_y: 2.0,
         captured_at_ms: 123,
+        encoded_bytes: 3,
+        quality: 70,
+        capture_pixel_ratio: 2.0,
         url: "https://preview.gsd.local".to_string(),
         title: "Preview".to_string(),
     };
@@ -54,11 +63,12 @@ fn cloud_frame_contract_includes_viewport_metadata() {
 #[test]
 fn cloud_user_input_accepts_web_surface_metadata() {
     let input: CloudUserInput = serde_json::from_value(json!({
-        "kind": "pointer_down",
+        "kind": "pointer",
+        "phase": "down",
         "owner": "user",
         "controlVersion": 4,
-        "frameSequence": 9,
-        "coordinateSpace": "viewport-css-px",
+        "frameSeq": 9,
+        "coordinateSpace": "viewport_css",
         "x": 12.5,
         "y": 24.25,
         "button": "left",
@@ -66,11 +76,12 @@ fn cloud_user_input_accepts_web_surface_metadata() {
     }))
     .expect("deserialize user input");
 
-    assert_eq!(input.kind, "pointer_down");
+    assert_eq!(input.kind, "pointer");
+    assert_eq!(input.phase.as_deref(), Some("down"));
     assert_eq!(input.owner.as_deref(), Some("user"));
     assert_eq!(input.control_version, Some(4));
-    assert_eq!(input.frame_sequence, Some(9));
-    assert_eq!(input.coordinate_space.as_deref(), Some("viewport-css-px"));
+    assert_eq!(input.frame_seq, Some(9));
+    assert_eq!(input.coordinate_space.as_deref(), Some("viewport_css"));
     assert_eq!(input.x, Some(12.5));
     assert_eq!(input.y, Some(24.25));
     assert_eq!(input.button.as_deref(), Some("left"));
@@ -81,8 +92,8 @@ fn cloud_user_input_accepts_web_surface_metadata() {
 
     let rendered: Value = serde_json::to_value(input).expect("serialize user input");
     assert_eq!(rendered["controlVersion"], 4);
-    assert_eq!(rendered["frameSequence"], 9);
-    assert_eq!(rendered["coordinateSpace"], "viewport-css-px");
+    assert_eq!(rendered["frameSeq"], 9);
+    assert_eq!(rendered["coordinateSpace"], "viewport_css");
 }
 
 #[test]
@@ -114,6 +125,8 @@ fn cloud_methods_manifest_contains_known_methods() {
         serde_json::from_slice(&output.stdout).expect("manifest json");
     assert_eq!(manifest["manifestVersion"], 1);
     assert_eq!(manifest["runtimeMinVersion"], "0.1.20");
+    assert_eq!(manifest["input"]["coordinateSpace"], "viewport_css");
+    assert_eq!(manifest["identity"]["localFirst"], true);
 
     let methods = manifest["methods"].as_array().expect("methods");
     let method_names: std::collections::BTreeSet<_> = methods

@@ -109,11 +109,14 @@ pub fn sanitize_filename(name: &str) -> Result<&str, String> {
     if name.contains('/')
         || name.contains('\\')
         || name.contains("..")
+        || name.contains(':')
         || name.contains('\0')
+        || name.to_ascii_lowercase().contains("%2f")
+        || name.to_ascii_lowercase().contains("%5c")
         || name == "."
     {
         return Err(format!(
-            "invalid name: must not contain '/', '\\', '..', or null bytes — got '{name}'"
+            "invalid name: must not contain path separators, '..', ':', encoded separators, or null bytes — got '{name}'"
         ));
     }
     Ok(name)

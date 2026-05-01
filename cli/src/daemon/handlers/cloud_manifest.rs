@@ -1,6 +1,6 @@
 use gsd_browser_common::cloud::{
-    CloudToolManifest, CloudToolManifestMethod, CLOUD_TOOL_MANIFEST_VERSION,
-    CLOUD_TOOL_RUNTIME_MIN_VERSION,
+    CloudIdentityCapabilities, CloudInputCapabilities, CloudToolManifest, CloudToolManifestMethod,
+    CLOUD_TOOL_MANIFEST_VERSION, CLOUD_TOOL_RUNTIME_MIN_VERSION,
 };
 use serde_json::{to_value, Value};
 
@@ -10,6 +10,34 @@ pub fn build_cloud_methods_manifest() -> CloudToolManifest {
     CloudToolManifest {
         manifest_version: CLOUD_TOOL_MANIFEST_VERSION,
         runtime_min_version: CLOUD_TOOL_RUNTIME_MIN_VERSION.to_string(),
+        input: CloudInputCapabilities {
+            coordinate_space: "viewport_css".to_string(),
+            kinds: vec![
+                "pointer".to_string(),
+                "wheel".to_string(),
+                "key".to_string(),
+                "text".to_string(),
+                "paste".to_string(),
+                "composition".to_string(),
+                "navigation".to_string(),
+            ],
+            pointer_phases: vec![
+                "move".to_string(),
+                "down".to_string(),
+                "up".to_string(),
+                "click".to_string(),
+                "double_click".to_string(),
+                "context_click".to_string(),
+            ],
+        },
+        identity: CloudIdentityCapabilities {
+            scopes: vec![
+                "session".to_string(),
+                "project".to_string(),
+                "global".to_string(),
+            ],
+            local_first: true,
+        },
         methods: CLOUD_TOOL_METHODS
             .iter()
             .map(|method| CloudToolManifestMethod {
@@ -43,6 +71,8 @@ mod tests {
 
         assert_eq!(manifest.manifest_version, CLOUD_TOOL_MANIFEST_VERSION);
         assert_eq!(manifest.runtime_min_version, CLOUD_TOOL_RUNTIME_MIN_VERSION);
+        assert_eq!(manifest.input.coordinate_space, "viewport_css");
+        assert!(manifest.identity.local_first);
         assert_eq!(actual, expected);
     }
 }
