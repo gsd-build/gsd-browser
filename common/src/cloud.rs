@@ -39,6 +39,24 @@ pub struct CloudToolRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CloudToolManifest {
+    pub manifest_version: u32,
+    pub runtime_min_version: String,
+    pub methods: Vec<CloudToolManifestMethod>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudToolManifestMethod {
+    pub name: String,
+    pub category: String,
+}
+
+pub const CLOUD_TOOL_MANIFEST_VERSION: u32 = 1;
+pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.19";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CloudRefs {
     pub version: u64,
     pub refs: Vec<CloudRef>,

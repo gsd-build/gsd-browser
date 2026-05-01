@@ -643,6 +643,8 @@ enum Commands {
         #[command(subcommand)]
         cmd: DaemonCmd,
     },
+    /// Print the Cloud browser method manifest
+    CloudMethods,
 }
 
 #[derive(Subcommand)]
@@ -738,6 +740,7 @@ async fn main() {
             DaemonCmd::Stop => cmd_daemon_stop(&cli).await,
             DaemonCmd::Health => cmd_daemon_health(&cli).await,
         },
+        Commands::CloudMethods => cmd_cloud_methods(&cli),
         Commands::Navigate { url, .. } => cmd_navigate(&cli, url).await,
         Commands::Back => cmd_back(&cli).await,
         Commands::Forward => cmd_forward(&cli).await,
@@ -1014,6 +1017,25 @@ async fn main() {
 }
 
 type CmdResult = Result<(), Box<dyn std::error::Error>>;
+
+fn cmd_cloud_methods(cli: &Cli) -> CmdResult {
+    let manifest = daemon::handlers::cloud_manifest::build_cloud_methods_manifest();
+    if cli.json {
+        println!("{}", serde_json::to_string_pretty(&manifest)?);
+        return Ok(());
+    }
+
+    println!("Cloud browser method manifest");
+    println!("Manifest version: {}", manifest.manifest_version);
+    println!("Runtime minimum: {}", manifest.runtime_min_version);
+    println!();
+    println!("{:<24} Category", "Method");
+    println!("{:-<24} {:-<24}", "", "");
+    for method in manifest.methods {
+        println!("{:<24} {}", method.name, method.category);
+    }
+    Ok(())
+}
 
 fn exit_with_validation_error(cli: &Cli, message: impl Into<String>) -> ! {
     let message = message.into();
