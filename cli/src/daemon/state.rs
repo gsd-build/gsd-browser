@@ -224,6 +224,7 @@ pub struct DaemonState {
     pub mock_routes: Mutex<MockRouteStore>,
     pub action_cache: Mutex<ActionCache>,
     pub trace_state: Mutex<TraceState>,
+    pub narrator: Arc<crate::daemon::narration::Narrator>,
 }
 
 impl DaemonState {
@@ -233,6 +234,10 @@ impl DaemonState {
     }
 
     pub fn new_with_session(session: SessionRuntime) -> Self {
+        Self::new_with_session_and_options(session, false)
+    }
+
+    pub fn new_with_session_and_options(session: SessionRuntime, no_narration_delay: bool) -> Self {
         Self {
             session,
             timeline: Mutex::new(ActionTimeline::new()),
@@ -243,6 +248,7 @@ impl DaemonState {
             mock_routes: Mutex::new(MockRouteStore::new()),
             action_cache: Mutex::new(ActionCache::new()),
             trace_state: Mutex::new(TraceState::new()),
+            narrator: crate::daemon::narration::Narrator::new(no_narration_delay),
         }
     }
 }
