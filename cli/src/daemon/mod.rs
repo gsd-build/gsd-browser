@@ -3,8 +3,10 @@ pub mod handlers;
 pub mod helpers;
 pub mod inspection;
 pub mod logs;
+pub mod narration;
 pub mod settle;
 pub mod state;
+pub mod view;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
@@ -44,6 +46,7 @@ pub async fn run(
     identity_scope: Option<String>,
     identity_key: Option<String>,
     identity_project_id: Option<String>,
+    no_narration_delay: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
     let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
@@ -64,6 +67,7 @@ pub async fn run(
         identity_scope,
         identity_key,
         identity_project_id,
+        no_narration_delay,
     )
     .await
 }
@@ -126,7 +130,7 @@ fn cleanup_browser_profile_singletons(profile_dir: &Path) {
     }
 }
 
-async fn set_default_viewport(page: &Page) {
+pub(crate) async fn set_default_viewport(page: &Page) {
     let params = SetDeviceMetricsOverrideParams::new(
         DEFAULT_VIEWPORT_WIDTH,
         DEFAULT_VIEWPORT_HEIGHT,
@@ -150,6 +154,7 @@ async fn run_daemon(
     identity_scope_arg: Option<String>,
     identity_key_arg: Option<String>,
     identity_project_id_arg: Option<String>,
+    no_narration_delay: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
@@ -264,7 +269,7 @@ async fn run_daemon(
     save_session_manifest(session, &starting_manifest)
         .map_err(|err| -> Box<dyn std::error::Error> { err.into() })?;
 
-    let (mut browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
+    let (browser, mut handler) = if let Some(ref cdp_url) = effective_cdp_url {
         // Connect to an already-running Chrome instance via CDP
         info!(
             "[gsd-browser-daemon] connecting to existing Chrome at {}",
@@ -346,12 +351,11 @@ async fn run_daemon(
             }
         }
     });
+    let browser = Arc::new(tokio::sync::Mutex::new(browser));
 
     // Create initial page
-    let page = browser.new_page("about:blank").await?;
-    if effective_cdp_url.is_none() {
-        set_default_viewport(&page).await;
-    }
+    let page = browser.lock().await.new_page("about:blank").await?;
+    set_default_viewport(&page).await;
     info!("[gsd-browser-daemon] initial page created");
 
     // Inject browser-side helpers and install mutation counter
@@ -379,25 +383,33 @@ async fn run_daemon(
 
     // Create log buffers and spawn event listeners
     let daemon_logs = Arc::new(DaemonLogs::new());
-    let browser_pid = browser
-        .get_mut_child()
-        .and_then(|child| child.as_mut_inner().id());
-    let browser_user_data_dir = browser
-        .config()
-        .and_then(|cfg| cfg.user_data_dir.as_ref())
-        .map(|path| path.display().to_string());
-    let daemon_state = Arc::new(DaemonState::new_with_session(SessionRuntime {
-        session_name: session.map(str::to_string),
-        launch_mode: launch_mode.clone(),
-        cdp_url: effective_cdp_url.clone(),
-        websocket_url: Some(browser.websocket_address().clone()),
-        browser_pid,
-        browser_user_data_dir,
-        identity_scope,
-        identity_project_id: identity_project_id_arg.clone(),
-        identity_key: identity_key_arg.clone(),
-        socket_path: sock_path.to_string_lossy().to_string(),
-    }));
+    let (browser_pid, browser_user_data_dir, websocket_url) = {
+        let mut browser_guard = browser.lock().await;
+        let browser_pid = browser_guard
+            .get_mut_child()
+            .and_then(|child| child.as_mut_inner().id());
+        let browser_user_data_dir = browser_guard
+            .config()
+            .and_then(|cfg| cfg.user_data_dir.as_ref())
+            .map(|path| path.display().to_string());
+        let websocket_url = browser_guard.websocket_address().clone();
+        (browser_pid, browser_user_data_dir, websocket_url)
+    };
+    let daemon_state = Arc::new(DaemonState::new_with_session_and_options(
+        SessionRuntime {
+            session_name: session.map(str::to_string),
+            launch_mode: launch_mode.clone(),
+            cdp_url: effective_cdp_url.clone(),
+            websocket_url: Some(websocket_url),
+            browser_pid,
+            browser_user_data_dir,
+            identity_scope,
+            identity_project_id: identity_project_id_arg.clone(),
+            identity_key: identity_key_arg.clone(),
+            socket_path: sock_path.to_string_lossy().to_string(),
+        },
+        no_narration_delay,
+    ));
     logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
@@ -440,7 +452,8 @@ async fn run_daemon(
                         info!("[gsd-browser-daemon] connection accepted");
                         let logs = Arc::clone(&daemon_logs);
                         let state = Arc::clone(&daemon_state);
-                        tokio::spawn(handle_connection(stream, logs, state));
+                        let browser = Arc::clone(&browser);
+                        tokio::spawn(handle_connection(stream, logs, state, browser));
                     }
                     Err(e) => {
                         error!("[gsd-browser-daemon] accept error: {e}");
@@ -467,8 +480,11 @@ async fn run_daemon(
         let _ = handlers::session::mark_session_stopped(&daemon_state, "daemon stopped").await;
     }
     drop(listener);
-    let _ = browser.close().await;
-    let _ = browser.wait().await;
+    {
+        let mut browser = browser.lock().await;
+        let _ = browser.close().await;
+        let _ = browser.wait().await;
+    }
     handler_task.abort();
     let _ = fs::remove_file(&sock_path);
     let _ = fs::remove_file(&pid_file_path);
@@ -481,6 +497,7 @@ async fn handle_connection(
     mut stream: tokio::net::UnixStream,
     logs: Arc<DaemonLogs>,
     state: Arc<DaemonState>,
+    browser: Arc<tokio::sync::Mutex<Browser>>,
 ) {
     let raw = match ipc::read_message(&mut stream).await {
         Ok(data) if data.is_empty() => return,
@@ -513,7 +530,7 @@ async fn handle_connection(
     };
 
     let response = match page {
-        Some(page) => dispatch(&request, &page, &logs, &state).await,
+        Some(page) => dispatch(&request, &page, &logs, &state, &browser).await,
         None => DaemonResponse::error(
             request.id,
             ERR_INTERNAL,
@@ -531,7 +548,8 @@ async fn dispatch(
     req: &DaemonRequest,
     page: &Page,
     logs: &DaemonLogs,
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
+    browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     // Determine if this method should be timeline-recorded
     let record_timeline = matches!(
@@ -606,7 +624,7 @@ async fn dispatch(
         diff.before = Some(before_state);
     }
 
-    let response = dispatch_inner(req, page, logs, state).await;
+    let response = dispatch_inner(req, page, logs, state, browser).await;
 
     // Finish action in timeline
     if let Some(id) = action_id {
@@ -704,7 +722,8 @@ pub(crate) async fn dispatch_inner(
     req: &DaemonRequest,
     page: &Page,
     logs: &DaemonLogs,
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
+    browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     match req.method.as_str() {
         "ping" => DaemonResponse::success(req.id, json!({"pong": true})),
@@ -745,6 +764,34 @@ pub(crate) async fn dispatch_inner(
             }
         }
         "health" => match handlers::session::handle_health(page, state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "goal" => match handlers::narration_cmds::handle_goal(state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "pause" => match handlers::narration_cmds::handle_pause(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "resume" => match handlers::narration_cmds::handle_resume(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "step" => match handlers::narration_cmds::handle_step(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "abort" => match handlers::narration_cmds::handle_abort(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "view_status" => match handlers::narration_cmds::handle_view_status(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "view" => match handlers::narration_cmds::handle_view(state, page, browser).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -803,7 +850,7 @@ pub(crate) async fn dispatch_inner(
                 json!({"retryHint": "Check selector targets an input/textarea element"}),
             ),
         },
-        "press" => match handlers::interaction::handle_press(page, &req.params).await {
+        "press" => match handlers::interaction::handle_press(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -816,7 +863,7 @@ pub(crate) async fn dispatch_inner(
                 json!({"retryHint": "Check selector is valid and element exists"}),
             ),
         },
-        "scroll" => match handlers::interaction::handle_scroll(page, &req.params).await {
+        "scroll" => match handlers::interaction::handle_scroll(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -832,7 +879,7 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "drag" => match handlers::interaction::handle_drag(page, &req.params).await {
+        "drag" => match handlers::interaction::handle_drag(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -842,10 +889,12 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "upload_file" => match handlers::interaction::handle_upload_file(page, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "upload_file" => {
+            match handlers::interaction::handle_upload_file(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "screenshot" => match handlers::screenshot::handle_screenshot(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(

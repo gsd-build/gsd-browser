@@ -21,6 +21,7 @@ pub fn handle_list_pages(state: &DaemonState) -> Result<Value, String> {
         .map(|e| {
             json!({
                 "id": e.id,
+                "targetId": e.target_id,
                 "title": e.title,
                 "url": e.url,
                 "isActive": e.id == active_id,
