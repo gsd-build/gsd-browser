@@ -672,7 +672,11 @@ pub async fn handle_set_checked(
 
 /// Handle `drag` command — simulate drag from source to target element.
 /// Params: { source: string, target: string }
-pub async fn handle_drag(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_drag(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let source_sel = params
         .get("source")
         .and_then(|v| v.as_str())
@@ -684,9 +688,15 @@ pub async fn handle_drag(page: &Page, params: &Value) -> Result<Value, String> {
 
     debug!("drag: source={source_sel} target={target_sel}");
 
-    // Get centers of both elements via JS
-    let centers_js = format!(
-        r#"(() => {{
+    with_narration(
+        page,
+        state,
+        ActionKind::Drag,
+        Some(source_sel),
+        Some(source_sel),
+        || async {
+            let centers_js = format!(
+                r#"(() => {{
             const src = document.querySelector({src_json});
             const tgt = document.querySelector({tgt_json});
             if (!src) throw new Error('source element not found: ' + {src_json});
@@ -700,65 +710,66 @@ pub async fn handle_drag(page: &Page, params: &Value) -> Result<Value, String> {
                 ty: tr.y + tr.height / 2,
             }};
         }})()"#,
-        src_json = serde_json::to_string(source_sel).unwrap(),
-        tgt_json = serde_json::to_string(target_sel).unwrap()
-    );
+                src_json = serde_json::to_string(source_sel).unwrap(),
+                tgt_json = serde_json::to_string(target_sel).unwrap()
+            );
 
-    let result = timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&centers_js))
-        .await
-        .map_err(|_| "drag: timed out getting element centers".to_string())?
-        .map_err(|e| format!("drag: failed to get element centers: {e}"))?;
+            let result = timeout(ELEMENT_TIMEOUT, page.evaluate_expression(&centers_js))
+                .await
+                .map_err(|_| "drag: timed out getting element centers".to_string())?
+                .map_err(|e| format!("drag: failed to get element centers: {e}"))?;
 
-    let centers = result.value().cloned().unwrap_or(json!({}));
-    let sx = centers
-        .get("sx")
-        .and_then(|v| v.as_f64())
-        .ok_or("drag: could not get source x")?;
-    let sy = centers
-        .get("sy")
-        .and_then(|v| v.as_f64())
-        .ok_or("drag: could not get source y")?;
-    let tx = centers
-        .get("tx")
-        .and_then(|v| v.as_f64())
-        .ok_or("drag: could not get target x")?;
-    let ty = centers
-        .get("ty")
-        .and_then(|v| v.as_f64())
-        .ok_or("drag: could not get target y")?;
+            let centers = result.value().cloned().unwrap_or(json!({}));
+            let sx = centers
+                .get("sx")
+                .and_then(|v| v.as_f64())
+                .ok_or("drag: could not get source x")?;
+            let sy = centers
+                .get("sy")
+                .and_then(|v| v.as_f64())
+                .ok_or("drag: could not get source y")?;
+            let tx = centers
+                .get("tx")
+                .and_then(|v| v.as_f64())
+                .ok_or("drag: could not get target x")?;
+            let ty = centers
+                .get("ty")
+                .and_then(|v| v.as_f64())
+                .ok_or("drag: could not get target y")?;
 
-    // Simulate drag via mouse events: move to source, press, move to target, release
-    timeout(CDP_TIMEOUT, page.move_mouse(Point::new(sx, sy)))
-        .await
-        .map_err(|_| "drag: timed out moving to source".to_string())?
-        .map_err(|e| format!("drag: move to source failed: {e}"))?;
+            timeout(CDP_TIMEOUT, page.move_mouse(Point::new(sx, sy)))
+                .await
+                .map_err(|_| "drag: timed out moving to source".to_string())?
+                .map_err(|e| format!("drag: move to source failed: {e}"))?;
 
-    timeout(CDP_TIMEOUT, page.click(Point::new(sx, sy)))
-        .await
-        .map_err(|_| "drag: timed out clicking source".to_string())?
-        .map_err(|e| format!("drag: click source failed: {e}"))?;
+            timeout(CDP_TIMEOUT, page.click(Point::new(sx, sy)))
+                .await
+                .map_err(|_| "drag: timed out clicking source".to_string())?
+                .map_err(|e| format!("drag: click source failed: {e}"))?;
 
-    // Move incrementally to the target
-    let steps = 10;
-    for i in 1..=steps {
-        let ratio = i as f64 / steps as f64;
-        let ix = sx + (tx - sx) * ratio;
-        let iy = sy + (ty - sy) * ratio;
-        let _ = timeout(CDP_TIMEOUT, page.move_mouse(Point::new(ix, iy))).await;
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
+            let steps = 10;
+            for i in 1..=steps {
+                let ratio = i as f64 / steps as f64;
+                let ix = sx + (tx - sx) * ratio;
+                let iy = sy + (ty - sy) * ratio;
+                let _ = timeout(CDP_TIMEOUT, page.move_mouse(Point::new(ix, iy))).await;
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
 
-    timeout(CDP_TIMEOUT, page.click(Point::new(tx, ty)))
-        .await
-        .map_err(|_| "drag: timed out clicking target".to_string())?
-        .map_err(|e| format!("drag: click target failed: {e}"))?;
+            timeout(CDP_TIMEOUT, page.click(Point::new(tx, ty)))
+                .await
+                .map_err(|_| "drag: timed out clicking target".to_string())?
+                .map_err(|e| format!("drag: click target failed: {e}"))?;
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "dragged": { "source": source_sel, "target": target_sel },
-    }))
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "dragged": { "source": source_sel, "target": target_sel },
+            }))
+        },
+    )
+    .await
 }
 
 // ── Set Viewport ──

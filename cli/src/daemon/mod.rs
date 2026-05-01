@@ -833,7 +833,7 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "drag" => match handlers::interaction::handle_drag(page, &req.params).await {
+        "drag" => match handlers::interaction::handle_drag(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
