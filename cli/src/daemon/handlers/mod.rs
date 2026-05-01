@@ -13,6 +13,7 @@ pub mod intent;
 pub mod interaction;
 pub mod navigate;
 pub mod network_mock;
+pub mod narration_cmds;
 pub mod pages;
 pub mod pdf;
 pub mod refs;

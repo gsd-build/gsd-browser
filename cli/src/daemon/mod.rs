@@ -749,6 +749,30 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "goal" => match handlers::narration_cmds::handle_goal(state, &req.params).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "pause" => match handlers::narration_cmds::handle_pause(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "resume" => match handlers::narration_cmds::handle_resume(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "step" => match handlers::narration_cmds::handle_step(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "abort" => match handlers::narration_cmds::handle_abort(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "view_status" => match handlers::narration_cmds::handle_view_status(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "navigate" => match handlers::navigate::handle_navigate(page, &req.params, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(
