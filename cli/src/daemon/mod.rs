@@ -751,10 +751,11 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "cloud_tool" => match dispatch_cloud_tool(req, page, logs, state, browser).await {
-            Ok(response) => response,
+        "cloud_refs" => match handlers::cloud::handle_cloud_refs(page, state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "cloud_tool" => dispatch_cloud_tool(req, page, logs, state, browser).await,
         "cloud_user_input" => {
             match handlers::cloud::handle_cloud_user_input(page, state, &req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),
@@ -1151,14 +1152,17 @@ async fn dispatch_cloud_tool(
     logs: &DaemonLogs,
     state: &Arc<DaemonState>,
     browser: &Arc<tokio::sync::Mutex<Browser>>,
-) -> Result<DaemonResponse, String> {
-    let tool_req: CloudToolRequest =
-        serde_json::from_value(req.params.clone()).map_err(|err| err.to_string())?;
+) -> DaemonResponse {
+    let tool_req: CloudToolRequest = match serde_json::from_value(req.params.clone()) {
+        Ok(value) => value,
+        Err(err) => return DaemonResponse::error(req.id, ERR_INTERNAL, err.to_string()),
+    };
     let Some(method) = handlers::cloud_methods::cloud_tool_method(&tool_req.method) else {
-        return Err(format!(
-            "unsupported cloud tool method: {}",
-            tool_req.method
-        ));
+        return DaemonResponse::error(
+            req.id,
+            ERR_METHOD_NOT_FOUND,
+            format!("unsupported cloud tool method: {}", tool_req.method),
+        );
     };
     debug!(
         "[gsd-browser-daemon] cloud_tool dispatch: method={} category={}",
@@ -1172,5 +1176,5 @@ async fn dispatch_cloud_tool(
         method: tool_req.method,
         params: tool_req.params,
     };
-    Ok(Box::pin(dispatch_inner(&forwarded, page, logs, state, browser)).await)
+    Box::pin(dispatch_inner(&forwarded, page, logs, state, browser)).await
 }

@@ -5,7 +5,9 @@ use chromiumoxide::cdp::browser_protocol::input::{
 };
 use chromiumoxide::keys;
 use chromiumoxide::Page;
-use gsd_browser_common::cloud::{CloudFrame, CloudSessionStatus, CloudUserInput};
+use gsd_browser_common::cloud::{
+    CloudFrame, CloudRef, CloudRefs, CloudSessionStatus, CloudUserInput,
+};
 use gsd_browser_common::identity::{
     identity_metadata_path, identity_profile_dir, BrowserIdentity, IdentityScope,
 };
@@ -373,6 +375,61 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
         title: page_title(page).await,
     };
     serde_json::to_value(frame).map_err(|err| err.to_string())
+}
+
+fn cloud_ref_from_snapshot_item(version: u64, key: &str, item: &Value) -> CloudRef {
+    let role = item
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .or_else(|| item.get("tag").and_then(Value::as_str))
+        .unwrap_or("element")
+        .to_string();
+    let name = item
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    CloudRef {
+        ref_id: format!("@v{version}:{key}"),
+        key: key.to_string(),
+        role,
+        name,
+        x: item.get("x").and_then(Value::as_f64).unwrap_or_default(),
+        y: item.get("y").and_then(Value::as_f64).unwrap_or_default(),
+        w: item.get("w").and_then(Value::as_f64).unwrap_or_default(),
+        h: item.get("h").and_then(Value::as_f64).unwrap_or_default(),
+    }
+}
+
+pub async fn handle_cloud_refs(page: &Page, state: &DaemonState) -> Result<Value, String> {
+    let snapshot =
+        handlers::refs::handle_snapshot(page, state, &json!({"mode": "interactive", "limit": 80}))
+            .await?;
+    let version = snapshot
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let refs = snapshot
+        .get("refs")
+        .and_then(Value::as_object)
+        .map(|items| {
+            let mut refs = items
+                .iter()
+                .map(|(key, item)| cloud_ref_from_snapshot_item(version, key, item))
+                .collect::<Vec<_>>();
+            refs.sort_by(|left, right| left.key.cmp(&right.key));
+            refs
+        })
+        .unwrap_or_default();
+
+    serde_json::to_value(CloudRefs {
+        version,
+        refs,
+        captured_at_ms: now_ms(),
+    })
+    .map_err(|err| err.to_string())
 }
 
 pub async fn handle_cloud_user_input(

@@ -298,6 +298,24 @@ function absoluteCenter(context, el) {
   return { x, y };
 }
 
+function absoluteBounds(context, el) {
+  const rect = el.getBoundingClientRect();
+  let x = rect.left;
+  let y = rect.top;
+  let win = context.win;
+
+  while (win && win !== win.top) {
+    const frameEl = win.frameElement;
+    if (!frameEl) break;
+    const frameRect = frameEl.getBoundingClientRect();
+    x += frameRect.left;
+    y += frameRect.top;
+    win = win.parent;
+  }
+
+  return { x, y, w: rect.width, h: rect.height };
+}
+
 function elementSummary(el, context) {
   const text = normalizeText(el.innerText || el.textContent || "");
   return {
@@ -910,10 +928,15 @@ pub async fn snapshot_elements(
 
         const tag = el.tagName.toLowerCase();
         const text = normalizeText(el.innerText || el.textContent || "").slice(0, 200);
+        const bounds = absoluteBounds(context, el);
         results.push({{
           tag,
           role: inferRole(el),
           name: accessibleName(el),
+          x: bounds.x,
+          y: bounds.y,
+          w: bounds.w,
+          h: bounds.h,
           selectorHints: selectorHints(el),
           visible,
           enabled: isEnabled(el),
