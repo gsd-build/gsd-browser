@@ -9,10 +9,11 @@ Built for AI agents, CI pipelines, and developers who want deterministic browser
 ### Recommended: installer (macOS / Linux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+curl -fsSL https://install.gsd.build/browser | bash
 ```
 
 The installer downloads the correct `gsd-browser` binary for your platform. If Chrome or Chromium is already installed, it uses that. Otherwise it downloads Chromium automatically when Chrome for Testing is available for your platform.
+Run `gsd-browser update` to install the current release.
 
 ### Pre-built binaries
 

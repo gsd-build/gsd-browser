@@ -2,13 +2,23 @@
 set -euo pipefail
 
 # gsd-browser installer
-# Usage: curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+# Usage: curl -fsSL https://install.gsd.build/browser | bash
+#
+# Environment variables (advanced):
+#   GSD_BROWSER_VERSION       - install a specific version (default: latest)
+#   GSD_BROWSER_DIR           - override install directory (default: $HOME/.gsd-browser)
+#   GSD_BROWSER_INSTALL_MODE  - install or update (default: install)
+#   GSD_BROWSER_SKIP_CHROMIUM - skip Chrome/Chromium setup when set to 1
+#   GSD_BROWSER_SKIP_SKILL    - skip AI agent skill installation when set to 1
 
 VERSION="${GSD_BROWSER_VERSION:-latest}"
 REPO="gsd-build/gsd-browser"
 INSTALL_DIR="${GSD_BROWSER_DIR:-$HOME/.gsd-browser}"
 BIN_DIR="$INSTALL_DIR/bin"
 CHROMIUM_DIR="$INSTALL_DIR/chromium"
+INSTALL_MODE="${GSD_BROWSER_INSTALL_MODE:-install}"
+SKIP_CHROMIUM="${GSD_BROWSER_SKIP_CHROMIUM:-0}"
+SKIP_SKILL="${GSD_BROWSER_SKIP_SKILL:-0}"
 
 # Colors
 cyan="\033[36m"
@@ -36,6 +46,32 @@ info()  { printf "  ${cyan}>${reset} %s\n" "$1"; }
 ok()    { printf "  ${green}✓${reset} %s\n" "$1"; }
 warn()  { printf "  ${yellow}!${reset} %s\n" "$1"; }
 fail()  { printf "  ${red}✗${reset} %s\n" "$1"; exit 1; }
+
+parse_args() {
+  for arg in "$@"; do
+    case "$arg" in
+      --update)
+        INSTALL_MODE="update"
+        SKIP_CHROMIUM=1
+        SKIP_SKILL=1
+        ;;
+      --skip-chromium)
+        SKIP_CHROMIUM=1
+        ;;
+      --skip-skill)
+        SKIP_SKILL=1
+        ;;
+      *)
+        fail "Unknown option: $arg"
+        ;;
+    esac
+  done
+
+  case "$INSTALL_MODE" in
+    install|update) ;;
+    *) fail "Invalid GSD_BROWSER_INSTALL_MODE: $INSTALL_MODE" ;;
+  esac
+}
 
 detect_platform() {
   local os arch
@@ -175,6 +211,11 @@ detect_existing_chrome() {
 }
 
 download_chromium() {
+  if [ "$SKIP_CHROMIUM" = "1" ]; then
+    info "Skipping Chrome/Chromium setup"
+    return
+  fi
+
   if [ -z "$CHROME_PLATFORM" ]; then
     warn "Chromium not available for $PLATFORM via Chrome for Testing"
     warn "Install Chrome/Chromium manually and set GSD_BROWSER_BROWSER_PATH"
@@ -382,6 +423,11 @@ install_skill_to() {
 }
 
 install_skill() {
+  if [ "$SKIP_SKILL" = "1" ]; then
+    info "Skipping skill installation"
+    return
+  fi
+
   echo ""
   printf "  ${cyan}${bold}AI Agent Skill Installation${reset}\n"
   printf "  ${dim}Install the gsd-browser skill so your AI coding agent knows how to use it${reset}\n"
@@ -493,11 +539,26 @@ install_skill() {
 }
 
 main() {
-  banner
+  parse_args "$@"
+  if [ "$INSTALL_MODE" = "update" ]; then
+    echo ""
+    printf "  ${cyan}${bold}Updating gsd-browser${reset}\n\n"
+  else
+    banner
+  fi
   detect_platform
   ok "Platform: $PLATFORM"
   resolve_version
   download_binary
+
+  if [ "$INSTALL_MODE" = "update" ]; then
+    verify
+    echo ""
+    printf "  ${green}${bold}Update complete!${reset}\n"
+    echo ""
+    return
+  fi
+
   download_chromium
   setup_path
   write_config
@@ -514,4 +575,4 @@ main() {
   echo ""
 }
 
-main
+main "$@"

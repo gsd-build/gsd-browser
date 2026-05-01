@@ -5,6 +5,9 @@ mod output;
 use clap::{Parser, Subcommand};
 use gsd_browser_common::config::Config;
 use gsd_browser_common::validate_session_name;
+use std::process::Command;
+
+const INSTALLER_URL: &str = "https://install.gsd.build/browser";
 
 #[derive(Parser)]
 #[command(
@@ -645,6 +648,8 @@ enum Commands {
     },
     /// Print the Cloud browser method manifest
     CloudMethods,
+    /// Update gsd-browser using the release installer
+    Update,
 }
 
 #[derive(Subcommand)]
@@ -741,6 +746,7 @@ async fn main() {
             DaemonCmd::Health => cmd_daemon_health(&cli).await,
         },
         Commands::CloudMethods => cmd_cloud_methods(&cli),
+        Commands::Update => cmd_update(&cli),
         Commands::Navigate { url, .. } => cmd_navigate(&cli, url).await,
         Commands::Back => cmd_back(&cli).await,
         Commands::Forward => cmd_forward(&cli).await,
@@ -1033,6 +1039,29 @@ fn cmd_cloud_methods(cli: &Cli) -> CmdResult {
     println!("{:-<24} {:-<24}", "", "");
     for method in manifest.methods {
         println!("{:<24} {}", method.name, method.category);
+    }
+    Ok(())
+}
+
+fn cmd_update(cli: &Cli) -> CmdResult {
+    let installer_url =
+        std::env::var("GSD_BROWSER_INSTALL_URL").unwrap_or_else(|_| INSTALLER_URL.to_string());
+
+    let status = Command::new("bash")
+        .arg("-c")
+        .arg("curl -fsSL \"$GSD_BROWSER_INSTALL_URL\" | bash -s -- --update")
+        .env("GSD_BROWSER_INSTALL_URL", installer_url)
+        .env("GSD_BROWSER_INSTALL_MODE", "update")
+        .env("GSD_BROWSER_SKIP_CHROMIUM", "1")
+        .env("GSD_BROWSER_SKIP_SKILL", "1")
+        .status()?;
+
+    if !status.success() {
+        return Err(format!("installer exited with status {status}").into());
+    }
+
+    if cli.json {
+        println!("{}", serde_json::json!({"status": "updated"}));
     }
     Ok(())
 }

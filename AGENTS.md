@@ -15,7 +15,7 @@ gsd-browser click-ref @v1:e1
 ### Installation
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+curl -fsSL https://install.gsd.build/browser | bash
 
 # or from a repo checkout
 cargo install --path cli

@@ -10,7 +10,7 @@
 
 ```bash
 # One-liner (macOS / Linux)
-curl -fsSL https://raw.githubusercontent.com/gsd-build/gsd-browser/main/install.sh | bash
+curl -fsSL https://install.gsd.build/browser | bash
 
 # Or from a repo checkout
 git clone https://github.com/gsd-build/gsd-browser.git
@@ -24,6 +24,7 @@ gsd-browser daemon stop
 ```
 
 The installer downloads the binary and reuses a system Chrome/Chromium when present. Otherwise it downloads Chromium automatically when Chrome for Testing is available for the platform.
+Run `gsd-browser update` to install the current release.
 
 **Step 2: Configure browser path (if needed)**
 
