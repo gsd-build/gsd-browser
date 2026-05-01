@@ -355,9 +355,7 @@ async fn run_daemon(
 
     // Create initial page
     let page = browser.lock().await.new_page("about:blank").await?;
-    if effective_cdp_url.is_none() {
-        set_default_viewport(&page).await;
-    }
+    set_default_viewport(&page).await;
     info!("[gsd-browser-daemon] initial page created");
 
     // Inject browser-side helpers and install mutation counter
