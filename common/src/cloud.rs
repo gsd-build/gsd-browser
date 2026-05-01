@@ -53,7 +53,7 @@ pub struct CloudToolManifestMethod {
 }
 
 pub const CLOUD_TOOL_MANIFEST_VERSION: u32 = 1;
-pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.19";
+pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.20";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

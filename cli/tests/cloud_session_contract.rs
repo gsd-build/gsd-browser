@@ -113,7 +113,7 @@ fn cloud_methods_manifest_contains_known_methods() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("manifest json");
     assert_eq!(manifest["manifestVersion"], 1);
-    assert_eq!(manifest["runtimeMinVersion"], "0.1.19");
+    assert_eq!(manifest["runtimeMinVersion"], "0.1.20");
 
     let methods = manifest["methods"].as_array().expect("methods");
     let method_names: std::collections::BTreeSet<_> = methods
