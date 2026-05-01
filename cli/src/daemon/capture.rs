@@ -12,6 +12,7 @@ use tracing::{debug, warn};
 
 /// Maximum timeout for the capture evaluate call.
 const CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
+const PAGE_METADATA_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// JS expression that captures compact page state in a single evaluate call.
 /// Returns a JSON-serializable object matching `CompactPageState`.
@@ -85,13 +86,26 @@ pub async fn capture_compact_page_state(page: &Page, include_body_text: bool) ->
 
     // Override URL and title from page-level API when available (frame-safe)
     let mut state = result;
-    if let Ok(Some(url)) = page.url().await {
-        state.url = url;
+    match timeout(PAGE_METADATA_TIMEOUT, page.url()).await {
+        Ok(Ok(Some(url))) => state.url = url,
+        Ok(Ok(None)) => {}
+        Ok(Err(e)) => warn!("capture_compact_page_state: page url error: {e}"),
+        Err(_) => warn!("capture_compact_page_state: page url timed out"),
     }
-    if let Ok(title) = page.evaluate_expression("document.title").await {
-        if let Ok(t) = title.into_value::<String>() {
-            state.title = t;
+
+    match timeout(
+        PAGE_METADATA_TIMEOUT,
+        page.evaluate_expression("document.title"),
+    )
+    .await
+    {
+        Ok(Ok(title)) => {
+            if let Ok(t) = title.into_value::<String>() {
+                state.title = t;
+            }
         }
+        Ok(Err(e)) => warn!("capture_compact_page_state: title evaluate error: {e}"),
+        Err(_) => warn!("capture_compact_page_state: title evaluate timed out"),
     }
 
     state

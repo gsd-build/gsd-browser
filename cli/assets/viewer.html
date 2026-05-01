@@ -102,6 +102,28 @@
     padding-right: 6px;
     pointer-events: none;
   }
+  body.history-only #stage,
+  body.history-only #goal,
+  body.history-only #controls {
+    display: none;
+  }
+  body.history-only #status {
+    top: 12px;
+    bottom: auto;
+  }
+  body.history-only #history {
+    top: 52px;
+    right: 50%;
+    bottom: 24px;
+    transform: translateX(50%);
+    width: min(720px, calc(100vw - 32px));
+    flex-direction: column;
+    pointer-events: auto;
+  }
+  body.history-only .hist-item {
+    min-height: 42px;
+    font-size: 14px;
+  }
   #history::-webkit-scrollbar { width: 6px; }
   #history::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
   .hist-item {
@@ -321,6 +343,8 @@ const refTip = document.getElementById('ref-tip');
 const label = document.getElementById('label');
 const wrap = document.getElementById('wrap');
 const status = document.getElementById('status');
+const historyOnly = new URLSearchParams(location.search).has('history');
+document.body.classList.toggle('history-only', historyOnly);
 
 let cursorPos = { x: 960, y: 540 };
 let currentViewport = { width: 1920, height: 1080 };
@@ -345,7 +369,7 @@ frame.addEventListener('load', () => {
 });
 
 function setStatus(msg, live = false) {
-  status.textContent = msg;
+  status.textContent = historyOnly && live ? 'history · ' + msg : msg;
   status.classList.toggle('live', live);
 }
 

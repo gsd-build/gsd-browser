@@ -31,8 +31,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::UnixListener;
+use tokio::time::timeout;
 use tracing::{debug, error, info, warn};
+
+const PAGE_URL_TIMEOUT: Duration = Duration::from_secs(2);
 
 const DEFAULT_VIEWPORT_WIDTH: i64 = 1920;
 const DEFAULT_VIEWPORT_HEIGHT: i64 = 1080;
@@ -592,10 +596,7 @@ async fn dispatch(
 
     // Record before-URL and begin action
     let action_id = if record_timeline {
-        let before_url = match page.url().await {
-            Ok(Some(u)) => u,
-            _ => String::new(),
-        };
+        let before_url = bounded_page_url(page).await;
         let mut timeline = state.timeline.lock().unwrap();
         Some(timeline.begin_action(&req.method, &params_summary, &before_url))
     } else {
@@ -628,10 +629,7 @@ async fn dispatch(
 
     // Finish action in timeline
     if let Some(id) = action_id {
-        let after_url = match page.url().await {
-            Ok(Some(u)) => u,
-            _ => String::new(),
-        };
+        let after_url = bounded_page_url(page).await;
         let (status, error) = if response.error.is_some() {
             (
                 "error",
@@ -675,6 +673,21 @@ async fn dispatch(
     }
 
     response
+}
+
+async fn bounded_page_url(page: &Page) -> String {
+    match timeout(PAGE_URL_TIMEOUT, page.url()).await {
+        Ok(Ok(Some(url))) => url,
+        Ok(Ok(None)) => String::new(),
+        Ok(Err(err)) => {
+            warn!("[gsd-browser-daemon] page url error: {err}");
+            String::new()
+        }
+        Err(_) => {
+            warn!("[gsd-browser-daemon] page url timed out");
+            String::new()
+        }
+    }
 }
 
 fn should_sync_session_manifest(method: &str) -> bool {

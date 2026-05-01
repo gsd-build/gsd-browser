@@ -422,6 +422,9 @@ enum Commands {
         /// Print the URL without opening it
         #[arg(long)]
         print_only: bool,
+        /// Open the history-focused viewer
+        #[arg(long)]
+        history: bool,
     },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
@@ -875,7 +878,10 @@ async fn main() {
         Commands::Resume => cmd_control(&cli, "resume").await,
         Commands::Step => cmd_control(&cli, "step").await,
         Commands::Abort => cmd_control(&cli, "abort").await,
-        Commands::View { print_only } => cmd_view(&cli, *print_only).await,
+        Commands::View {
+            print_only,
+            history,
+        } => cmd_view(&cli, *print_only, *history).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
         Commands::VisualDiff {
@@ -1818,7 +1824,7 @@ async fn cmd_control(cli: &Cli, method: &str) -> CmdResult {
     handle_response(cli, resp, format_text_control)
 }
 
-async fn cmd_view(cli: &Cli, print_only: bool) -> CmdResult {
+async fn cmd_view(cli: &Cli, print_only: bool, history: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "view",
         serde_json::json!({}),
@@ -1836,11 +1842,21 @@ async fn cmd_view(cli: &Cli, print_only: bool) -> CmdResult {
         std::process::exit(1);
     }
     let result = resp.result.ok_or("view response missing result")?;
-    let url = result
+    let base_url = result
         .get("url")
         .and_then(|value| value.as_str())
         .ok_or("view response missing url")?;
+    let url = if history {
+        format!("{base_url}?history=1")
+    } else {
+        base_url.to_string()
+    };
     if cli.json {
+        let mut result = result;
+        if let Some(obj) = result.as_object_mut() {
+            obj.insert("url".to_string(), serde_json::Value::String(url.clone()));
+            obj.insert("history".to_string(), serde_json::Value::Bool(history));
+        }
         println!("{}", output::format_json(&result));
     } else {
         println!("{url}");
@@ -1855,7 +1871,7 @@ async fn cmd_view(cli: &Cli, print_only: bool) -> CmdResult {
         };
         let mut command = std::process::Command::new(opener);
         if cfg!(target_os = "windows") {
-            command.args(["/C", "start", "", url]);
+            command.args(["/C", "start", "", &url]);
         } else {
             command.arg(url);
         }
