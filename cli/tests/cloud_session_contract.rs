@@ -1,5 +1,5 @@
 use gsd_browser_common::{
-    cloud::{CloudFrame, CloudUserInput},
+    cloud::{CloudFrame, CloudRef, CloudRefs, CloudToolRequest, CloudUserInput},
     identity::{identity_profile_dir, IdentityScope},
 };
 use serde_json::{json, Value};
@@ -83,4 +83,46 @@ fn cloud_user_input_accepts_web_surface_metadata() {
     assert_eq!(rendered["controlVersion"], 4);
     assert_eq!(rendered["frameSequence"], 9);
     assert_eq!(rendered["coordinateSpace"], "viewport-css-px");
+}
+
+#[test]
+fn cloud_tool_request_serializes_expanded_method_names() {
+    let request = CloudToolRequest {
+        method: "check_injection".to_string(),
+        params: serde_json::json!({ "includeHidden": true }),
+    };
+
+    let value = serde_json::to_value(request).expect("serialize request");
+
+    assert_eq!(value["method"], "check_injection");
+    assert_eq!(value["params"]["includeHidden"], true);
+}
+
+#[test]
+fn cloud_refs_contract_uses_numeric_version_and_rendered_refs() {
+    let refs = CloudRefs {
+        version: 3,
+        refs: vec![CloudRef {
+            ref_id: "@v3:e1".to_string(),
+            key: "e1".to_string(),
+            role: "button".to_string(),
+            name: Some("Submit".to_string()),
+            x: 12.5,
+            y: 24.5,
+            w: 80.0,
+            h: 32.0,
+        }],
+        truncated: true,
+        limit: Some(200),
+        captured_at_ms: 123,
+    };
+
+    let value = serde_json::to_value(refs).expect("serialize refs");
+
+    assert_eq!(value["version"], 3);
+    assert_eq!(value["refs"][0]["ref"], "@v3:e1");
+    assert_eq!(value["refs"][0]["key"], "e1");
+    assert_eq!(value["truncated"], true);
+    assert_eq!(value["limit"], 200);
+    assert_eq!(value["capturedAtMs"], 123);
 }

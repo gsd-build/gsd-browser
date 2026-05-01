@@ -5,7 +5,9 @@ use chromiumoxide::cdp::browser_protocol::input::{
 };
 use chromiumoxide::keys;
 use chromiumoxide::Page;
-use gsd_browser_common::cloud::{CloudFrame, CloudSessionStatus, CloudToolRequest, CloudUserInput};
+use gsd_browser_common::cloud::{
+    CloudFrame, CloudRef, CloudRefs, CloudSessionStatus, CloudUserInput,
+};
 use gsd_browser_common::identity::{
     identity_metadata_path, identity_profile_dir, BrowserIdentity, IdentityScope,
 };
@@ -17,7 +19,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::timeout;
 
-use crate::daemon::{handlers, logs::DaemonLogs, state::DaemonState};
+use crate::daemon::{handlers, state::DaemonState};
 
 static FRAME_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -375,38 +377,73 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
     serde_json::to_value(frame).map_err(|err| err.to_string())
 }
 
-pub async fn handle_cloud_tool(
+fn cloud_ref_from_snapshot_item(version: u64, key: &str, item: &Value) -> CloudRef {
+    let role = item
+        .get("role")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .or_else(|| item.get("tag").and_then(Value::as_str))
+        .unwrap_or("element")
+        .to_string();
+    let name = item
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    CloudRef {
+        ref_id: format!("@v{version}:{key}"),
+        key: key.to_string(),
+        role,
+        name,
+        x: item.get("x").and_then(Value::as_f64).unwrap_or_default(),
+        y: item.get("y").and_then(Value::as_f64).unwrap_or_default(),
+        w: item.get("w").and_then(Value::as_f64).unwrap_or_default(),
+        h: item.get("h").and_then(Value::as_f64).unwrap_or_default(),
+    }
+}
+
+pub async fn handle_cloud_refs(
     page: &Page,
-    logs: &DaemonLogs,
     state: &DaemonState,
     params: &Value,
 ) -> Result<Value, String> {
-    let req: CloudToolRequest =
-        serde_json::from_value(params.clone()).map_err(|err| err.to_string())?;
-    match req.method.as_str() {
-        "navigate" => handlers::navigate::handle_navigate(page, &req.params, state).await,
-        "back" => handlers::navigate::handle_back(page, state).await,
-        "forward" => handlers::navigate::handle_forward(page, state).await,
-        "reload" => handlers::navigate::handle_reload(page, state).await,
-        "click" => handlers::interaction::handle_click(page, state, &req.params).await,
-        "type" => handlers::interaction::handle_type_text(page, state, &req.params).await,
-        "press" => handlers::interaction::handle_press(page, state, &req.params).await,
-        "hover" => handlers::interaction::handle_hover(page, state, &req.params).await,
-        "scroll" => handlers::interaction::handle_scroll(page, state, &req.params).await,
-        "snapshot" => handlers::refs::handle_snapshot(page, state, &req.params).await,
-        "get_ref" => handlers::refs::handle_get_ref(state, &req.params),
-        "click_ref" => handlers::refs::handle_click_ref(page, state, &req.params).await,
-        "hover_ref" => handlers::refs::handle_hover_ref(page, state, &req.params).await,
-        "fill_ref" => handlers::refs::handle_fill_ref(page, state, &req.params).await,
-        "wait_for" => handlers::wait::handle_wait_for(page, logs, state, &req.params).await,
-        "extract" => handlers::extract::handle_extract(page, &req.params).await,
-        "assert" => handlers::assert_cmd::handle_assert(page, logs, state, &req.params).await,
-        "screenshot" => handlers::screenshot::handle_screenshot(page, &req.params).await,
-        "console" => handlers::inspect::handle_console(logs, &req.params),
-        "network" => handlers::inspect::handle_network(logs, &req.params),
-        "dialog" => handlers::inspect::handle_dialog(logs, &req.params),
-        _ => Err(format!("unsupported cloud tool method: {}", req.method)),
-    }
+    let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(200);
+    let snapshot = handlers::refs::handle_snapshot(
+        page,
+        state,
+        &json!({"mode": "interactive", "limit": limit}),
+    )
+    .await?;
+    let version = snapshot
+        .get("version")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let truncated = snapshot
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let refs = snapshot
+        .get("refs")
+        .and_then(Value::as_object)
+        .map(|items| {
+            let mut refs = items
+                .iter()
+                .map(|(key, item)| cloud_ref_from_snapshot_item(version, key, item))
+                .collect::<Vec<_>>();
+            refs.sort_by(|left, right| left.key.cmp(&right.key));
+            refs
+        })
+        .unwrap_or_default();
+
+    serde_json::to_value(CloudRefs {
+        version,
+        refs,
+        truncated,
+        limit: Some(limit),
+        captured_at_ms: now_ms(),
+    })
+    .map_err(|err| err.to_string())
 }
 
 pub async fn handle_cloud_user_input(

@@ -39,6 +39,30 @@ pub struct CloudToolRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CloudRefs {
+    pub version: u64,
+    pub refs: Vec<CloudRef>,
+    pub truncated: bool,
+    pub limit: Option<u64>,
+    pub captured_at_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudRef {
+    #[serde(rename = "ref")]
+    pub ref_id: String,
+    pub key: String,
+    pub role: String,
+    pub name: Option<String>,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CloudUserInput {
     pub kind: String,
     pub owner: Option<String>,
