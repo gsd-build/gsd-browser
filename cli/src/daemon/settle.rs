@@ -18,6 +18,7 @@ const ZERO_MUTATION_QUIET_MS: u64 = 30;
 
 /// Maximum timeout for any single `page.evaluate()` call.
 const EVALUATE_TIMEOUT: Duration = Duration::from_secs(25);
+const PAGE_URL_TIMEOUT: Duration = Duration::from_secs(2);
 
 // ── JS snippets (evaluated in Chrome's V8) ──
 
@@ -99,6 +100,21 @@ async fn read_settle_state(page: &Page, check_focus: bool) -> SettleState {
     }
 }
 
+async fn read_page_url(page: &Page) -> String {
+    match timeout(PAGE_URL_TIMEOUT, page.url()).await {
+        Ok(Ok(Some(url))) => url,
+        Ok(Ok(None)) => String::new(),
+        Ok(Err(e)) => {
+            warn!("read_page_url error: {e}");
+            String::new()
+        }
+        Err(_) => {
+            warn!("read_page_url timed out");
+            String::new()
+        }
+    }
+}
+
 /// Adaptive DOM settling — polls until DOM mutations quiet down.
 ///
 /// Returns a `SettleResult` with the settle reason, duration, and poll count.
@@ -130,7 +146,7 @@ pub async fn settle_after_action(page: &Page, opts: &SettleOptions) -> SettleRes
     let mut previous_focus = initial.focus_descriptor;
 
     // Get initial URL
-    let mut previous_url = page.url().await.ok().flatten().unwrap_or_default();
+    let mut previous_url = read_page_url(page).await;
 
     while started_at.elapsed().as_millis() < timeout_ms as u128 {
         sleep(Duration::from_millis(poll_ms)).await;
@@ -138,7 +154,7 @@ pub async fn settle_after_action(page: &Page, opts: &SettleOptions) -> SettleRes
         let now = Instant::now();
 
         // Check URL change
-        let current_url = page.url().await.ok().flatten().unwrap_or_default();
+        let current_url = read_page_url(page).await;
         if current_url != previous_url {
             saw_url_change = true;
             previous_url = current_url;

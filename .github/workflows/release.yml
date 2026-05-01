@@ -90,6 +90,7 @@ jobs:
 
           # Verify signature
           codesign --verify --deep --strict "${{ matrix.artifact }}"
+          ./${{ matrix.artifact }} --version
 
           # Clean up
           rm -f certificate.p12
@@ -112,6 +113,8 @@ jobs:
             --wait
 
           rm -f "${{ matrix.artifact }}.zip"
+          codesign --verify --deep --strict "${{ matrix.artifact }}"
+          ./${{ matrix.artifact }} --version
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

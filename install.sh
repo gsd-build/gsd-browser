@@ -86,11 +86,17 @@ download_binary() {
   mkdir -p "$BIN_DIR"
 
   local target="$BIN_DIR/gsd-browser"
+  local tmp
+  tmp="$(mktemp "$BIN_DIR/.gsd-browser.XXXXXX")"
+  trap 'rm -f "$tmp"' EXIT
 
-  if ! curl -fsSL -o "$target" "$url"; then
+  if ! curl -fsSL -o "$tmp" "$url"; then
+    rm -f "$tmp"
     fail "Download failed: $url"
   fi
 
+  chmod +x "$tmp"
+  mv -f "$tmp" "$target"
   chmod +x "$target"
 
   # On macOS, strip quarantine/provenance attributes added by curl, then verify
@@ -102,7 +108,17 @@ download_binary() {
 
     if command -v codesign >/dev/null 2>&1; then
       if codesign --verify --strict "$target" 2>/dev/null; then
-        ok "Binary signature verified (Developer ID)"
+        if "$target" --version >/dev/null 2>&1; then
+          ok "Binary signature verified (Developer ID)"
+        else
+          warn "Developer ID signature verifies but macOS refused to launch the binary"
+          codesign --sign - --force "$target" 2>/dev/null && "$target" --version >/dev/null 2>&1 && {
+            ok "Ad-hoc signed for macOS Gatekeeper"
+          } || {
+            warn "Ad-hoc signing failed — binary may be blocked by Gatekeeper"
+            warn "Fix manually: codesign --sign - --force $target"
+          }
+        fi
       else
         codesign --sign - --force "$target" 2>/dev/null && {
           ok "Ad-hoc signed for macOS Gatekeeper"
@@ -113,6 +129,8 @@ download_binary() {
       fi
     fi
   fi
+
+  trap - EXIT
 
   ok "Binary installed: $target"
 }
