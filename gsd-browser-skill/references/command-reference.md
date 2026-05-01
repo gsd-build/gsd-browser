@@ -347,6 +347,7 @@ gsd-browser action-cache --action clear
 gsd-browser daemon health
 gsd-browser daemon stop
 gsd-browser daemon start
+gsd-browser update
 ```
 
 The daemon auto-starts on browser commands. `daemon health` is read-only and does not start a session. `daemon stop` is idempotent — safe to call even if the process is already dead.

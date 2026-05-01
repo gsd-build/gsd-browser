@@ -107,7 +107,7 @@ async function main() {
         `    git clone https://github.com/${REPO}.git\n` +
         `    cd gsd-browser\n` +
         `    cargo install --path cli\n` +
-        `  Or use the installer: curl -fsSL https://raw.githubusercontent.com/${REPO}/main/install.sh | bash`
+        `  Or use the installer: curl -fsSL https://install.gsd.build/browser | bash`
       );
       process.exit(1);
     }
