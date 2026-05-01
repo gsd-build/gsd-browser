@@ -714,7 +714,6 @@ fn should_sync_session_manifest(method: &str) -> bool {
             | "fill_form"
             | "act"
             | "batch"
-            | "cloud_tool"
             | "cloud_user_input"
             | "switch_page"
             | "close_page"
