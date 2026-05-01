@@ -6,6 +6,7 @@
 
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::inspection;
+use crate::daemon::narration::events::ActionKind;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
 use crate::daemon::state::DaemonState;
 use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
@@ -77,10 +78,33 @@ pub async fn handle_click(
     let y = params.get("y").and_then(|v| v.as_f64());
 
     match (selector, x, y) {
+        (None, None, _) | (None, _, None) => {
+            return Err(
+                "click requires either 'selector' or both 'x' and 'y' coordinates".to_string(),
+            )
+        }
+        _ => {}
+    }
+
+    let hint = selector.or(Some("coordinates"));
+    let probe = state
+        .narrator
+        .probe_action(page, ActionKind::Click, selector, hint)
+        .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
+
+    let result = match (selector, x, y) {
         (Some(sel), _, _) => click_selector(page, state, sel).await,
         (None, Some(cx), Some(cy)) => click_coordinates(page, cx, cy).await,
-        _ => Err("click requires either 'selector' or both 'x' and 'y' coordinates".to_string()),
-    }
+        _ => unreachable!("click parameters are validated before narration"),
+    };
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 async fn click_selector(page: &Page, state: &DaemonState, selector: &str) -> Result<Value, String> {
