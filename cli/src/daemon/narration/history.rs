@@ -33,6 +33,7 @@ impl History {
             .collect()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.events.len()
     }

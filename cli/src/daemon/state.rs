@@ -234,6 +234,7 @@ impl DaemonState {
         Self::new_with_session(SessionRuntime::default())
     }
 
+    #[cfg(test)]
     pub fn new_with_session(session: SessionRuntime) -> Self {
         Self::new_with_session_and_options(session, false)
     }

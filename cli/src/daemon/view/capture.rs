@@ -1,6 +1,6 @@
 use chromiumoxide::cdp::browser_protocol::page::{
     EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat,
-    StartScreencastParams, StopScreencastParams,
+    StartScreencastParams,
 };
 use chromiumoxide::Page;
 use std::sync::Arc;
@@ -57,8 +57,4 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
         };
         let _ = frames_tx.send(msg);
     }
-}
-
-pub async fn stop_capture(page: &Page) {
-    let _ = page.execute(StopScreencastParams {}).await;
 }
