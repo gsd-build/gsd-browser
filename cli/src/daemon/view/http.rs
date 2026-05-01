@@ -58,5 +58,6 @@ pub fn router(state: ViewState) -> Router {
         .route("/", get(root))
         .route("/health", get(health))
         .route("/control", get(get_control).post(post_control))
+        .route("/ws", get(crate::daemon::view::ws::ws_upgrade))
         .with_state(state)
 }
