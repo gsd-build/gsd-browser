@@ -3,6 +3,7 @@ pub mod handlers;
 pub mod helpers;
 pub mod inspection;
 pub mod logs;
+pub mod narration;
 pub mod settle;
 pub mod state;
 
