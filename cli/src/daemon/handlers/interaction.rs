@@ -624,38 +624,48 @@ pub async fn handle_set_checked(
 
     debug!("set_checked: selector={selector} checked={checked}");
 
-    let action_result = inspection::perform_selector_action(
+    with_narration(
         page,
         state,
-        selector,
-        "set_checked",
-        &json!({ "checked": checked }),
-        true,
-    )
-    .await?;
-    if !action_result
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        return Err(selector_action_error(
-            &action_result,
-            &format!("set_checked failed for {selector}"),
-        ));
-    }
+        ActionKind::SetChecked,
+        Some(selector),
+        Some(selector),
+        || async {
+            let action_result = inspection::perform_selector_action(
+                page,
+                state,
+                selector,
+                "set_checked",
+                &json!({ "checked": checked }),
+                true,
+            )
+            .await?;
+            if !action_result
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(selector_action_error(
+                    &action_result,
+                    &format!("set_checked failed for {selector}"),
+                ));
+            }
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "checked": {
-            "selector": selector,
-            "value": checked,
-            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
-            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "checked": {
+                    "selector": selector,
+                    "value": checked,
+                    "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+                    "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+                },
+                "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
+            }))
         },
-        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
-    }))
+    )
+    .await
 }
 
 // ── Drag ──
