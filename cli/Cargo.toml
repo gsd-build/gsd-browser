@@ -1,6 +1,6 @@
 [package]
 name = "gsd-browser"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2021"
 description = "Browser automation CLI powered by Chrome DevTools Protocol"
 license = "MIT OR Apache-2.0"
