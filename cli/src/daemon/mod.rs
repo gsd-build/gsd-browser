@@ -751,7 +751,7 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "cloud_refs" => match handlers::cloud::handle_cloud_refs(page, state).await {
+        "cloud_refs" => match handlers::cloud::handle_cloud_refs(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
@@ -1176,5 +1176,5 @@ async fn dispatch_cloud_tool(
         method: tool_req.method,
         params: tool_req.params,
     };
-    Box::pin(dispatch_inner(&forwarded, page, logs, state, browser)).await
+    Box::pin(dispatch(&forwarded, page, logs, state, browser)).await
 }

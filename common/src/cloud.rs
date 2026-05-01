@@ -42,6 +42,8 @@ pub struct CloudToolRequest {
 pub struct CloudRefs {
     pub version: u64,
     pub refs: Vec<CloudRef>,
+    pub truncated: bool,
+    pub limit: Option<u64>,
     pub captured_at_ms: u64,
 }
 

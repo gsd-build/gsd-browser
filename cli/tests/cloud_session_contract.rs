@@ -112,6 +112,8 @@ fn cloud_refs_contract_uses_numeric_version_and_rendered_refs() {
             w: 80.0,
             h: 32.0,
         }],
+        truncated: true,
+        limit: Some(200),
         captured_at_ms: 123,
     };
 
@@ -120,5 +122,7 @@ fn cloud_refs_contract_uses_numeric_version_and_rendered_refs() {
     assert_eq!(value["version"], 3);
     assert_eq!(value["refs"][0]["ref"], "@v3:e1");
     assert_eq!(value["refs"][0]["key"], "e1");
+    assert_eq!(value["truncated"], true);
+    assert_eq!(value["limit"], 200);
     assert_eq!(value["capturedAtMs"], 123);
 }

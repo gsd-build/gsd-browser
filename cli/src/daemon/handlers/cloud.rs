@@ -403,14 +403,26 @@ fn cloud_ref_from_snapshot_item(version: u64, key: &str, item: &Value) -> CloudR
     }
 }
 
-pub async fn handle_cloud_refs(page: &Page, state: &DaemonState) -> Result<Value, String> {
-    let snapshot =
-        handlers::refs::handle_snapshot(page, state, &json!({"mode": "interactive", "limit": 80}))
-            .await?;
+pub async fn handle_cloud_refs(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(200);
+    let snapshot = handlers::refs::handle_snapshot(
+        page,
+        state,
+        &json!({"mode": "interactive", "limit": limit}),
+    )
+    .await?;
     let version = snapshot
         .get("version")
         .and_then(Value::as_u64)
         .unwrap_or_default();
+    let truncated = snapshot
+        .get("truncated")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let refs = snapshot
         .get("refs")
         .and_then(Value::as_object)
@@ -427,6 +439,8 @@ pub async fn handle_cloud_refs(page: &Page, state: &DaemonState) -> Result<Value
     serde_json::to_value(CloudRefs {
         version,
         refs,
+        truncated,
+        limit: Some(limit),
         captured_at_ms: now_ms(),
     })
     .map_err(|err| err.to_string())
