@@ -5,7 +5,7 @@ use chromiumoxide::cdp::browser_protocol::input::{
 };
 use chromiumoxide::keys;
 use chromiumoxide::Page;
-use gsd_browser_common::cloud::{CloudFrame, CloudSessionStatus, CloudToolRequest, CloudUserInput};
+use gsd_browser_common::cloud::{CloudFrame, CloudSessionStatus, CloudUserInput};
 use gsd_browser_common::identity::{
     identity_metadata_path, identity_profile_dir, BrowserIdentity, IdentityScope,
 };
@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::time::timeout;
 
-use crate::daemon::{handlers, logs::DaemonLogs, state::DaemonState};
+use crate::daemon::{handlers, state::DaemonState};
 
 static FRAME_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 const INPUT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -373,40 +373,6 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
         title: page_title(page).await,
     };
     serde_json::to_value(frame).map_err(|err| err.to_string())
-}
-
-pub async fn handle_cloud_tool(
-    page: &Page,
-    logs: &DaemonLogs,
-    state: &DaemonState,
-    params: &Value,
-) -> Result<Value, String> {
-    let req: CloudToolRequest =
-        serde_json::from_value(params.clone()).map_err(|err| err.to_string())?;
-    match req.method.as_str() {
-        "navigate" => handlers::navigate::handle_navigate(page, &req.params, state).await,
-        "back" => handlers::navigate::handle_back(page, state).await,
-        "forward" => handlers::navigate::handle_forward(page, state).await,
-        "reload" => handlers::navigate::handle_reload(page, state).await,
-        "click" => handlers::interaction::handle_click(page, state, &req.params).await,
-        "type" => handlers::interaction::handle_type_text(page, state, &req.params).await,
-        "press" => handlers::interaction::handle_press(page, state, &req.params).await,
-        "hover" => handlers::interaction::handle_hover(page, state, &req.params).await,
-        "scroll" => handlers::interaction::handle_scroll(page, state, &req.params).await,
-        "snapshot" => handlers::refs::handle_snapshot(page, state, &req.params).await,
-        "get_ref" => handlers::refs::handle_get_ref(state, &req.params),
-        "click_ref" => handlers::refs::handle_click_ref(page, state, &req.params).await,
-        "hover_ref" => handlers::refs::handle_hover_ref(page, state, &req.params).await,
-        "fill_ref" => handlers::refs::handle_fill_ref(page, state, &req.params).await,
-        "wait_for" => handlers::wait::handle_wait_for(page, logs, state, &req.params).await,
-        "extract" => handlers::extract::handle_extract(page, &req.params).await,
-        "assert" => handlers::assert_cmd::handle_assert(page, logs, state, &req.params).await,
-        "screenshot" => handlers::screenshot::handle_screenshot(page, &req.params).await,
-        "console" => handlers::inspect::handle_console(logs, &req.params),
-        "network" => handlers::inspect::handle_network(logs, &req.params),
-        "dialog" => handlers::inspect::handle_dialog(logs, &req.params),
-        _ => Err(format!("unsupported cloud tool method: {}", req.method)),
-    }
 }
 
 pub async fn handle_cloud_user_input(

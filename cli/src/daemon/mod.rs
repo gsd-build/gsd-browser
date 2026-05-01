@@ -15,6 +15,7 @@ use chromiumoxide::cdp::browser_protocol::page::EnableParams as PageEnableParams
 use chromiumoxide::cdp::js_protocol::runtime::EnableParams as RuntimeEnableParams;
 use chromiumoxide::Page;
 use futures::StreamExt;
+use gsd_browser_common::cloud::CloudToolRequest;
 use gsd_browser_common::session::{
     now_epoch_secs, save_session_manifest, session_dir_for, SessionHealthStatus, SessionManifest,
 };
@@ -750,12 +751,10 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
-        "cloud_tool" => {
-            match handlers::cloud::handle_cloud_tool(page, logs, state, &req.params).await {
-                Ok(result) => DaemonResponse::success(req.id, result),
-                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-            }
-        }
+        "cloud_tool" => match dispatch_cloud_tool(req, page, logs, state, browser).await {
+            Ok(response) => response,
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "cloud_user_input" => {
             match handlers::cloud::handle_cloud_user_input(page, state, &req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),
@@ -1144,4 +1143,34 @@ pub(crate) async fn dispatch_inner(
             format!("method not found: {}", req.method),
         ),
     }
+}
+
+async fn dispatch_cloud_tool(
+    req: &DaemonRequest,
+    page: &Page,
+    logs: &DaemonLogs,
+    state: &Arc<DaemonState>,
+    browser: &Arc<tokio::sync::Mutex<Browser>>,
+) -> Result<DaemonResponse, String> {
+    let tool_req: CloudToolRequest =
+        serde_json::from_value(req.params.clone()).map_err(|err| err.to_string())?;
+    let Some(method) = handlers::cloud_methods::cloud_tool_method(&tool_req.method) else {
+        return Err(format!(
+            "unsupported cloud tool method: {}",
+            tool_req.method
+        ));
+    };
+    debug!(
+        "[gsd-browser-daemon] cloud_tool dispatch: method={} category={}",
+        method.name,
+        method.category.as_str()
+    );
+
+    let forwarded = DaemonRequest {
+        jsonrpc: req.jsonrpc.clone(),
+        id: req.id,
+        method: tool_req.method,
+        params: tool_req.params,
+    };
+    Ok(Box::pin(dispatch_inner(&forwarded, page, logs, state, browser)).await)
 }
