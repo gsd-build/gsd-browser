@@ -5,6 +5,7 @@
 //! PageRegistry metadata, and returns a JSON result.
 
 use crate::daemon::capture::capture_compact_page_state;
+use crate::daemon::narration::events::{now_ms, ActionKind, NarrationEvent};
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
 use crate::daemon::state::DaemonState;
 use chromiumoxide::cdp::browser_protocol::page::{
@@ -37,34 +38,51 @@ pub async fn handle_navigate(
 
     debug!("navigate: url={url}");
 
-    // Navigate with 30s timeout — page.goto handles domcontentloaded wait
-    timeout(Duration::from_secs(30), page.goto(url))
+    let probe = state
+        .narrator
+        .probe_action(page, ActionKind::Navigate, None, Some(url))
+        .await;
+    state
+        .narrator
+        .emit_pre(&probe)
         .await
-        .map_err(|_| format!("navigation timed out after 30s for: {url}"))?
-        .map_err(|e| format!("navigation failed: {e}"))?;
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
 
-    // Brief pause for initial paint, then settle
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let result = async {
+        timeout(Duration::from_secs(30), page.goto(url))
+            .await
+            .map_err(|_| format!("navigation timed out after 30s for: {url}"))?
+            .map_err(|e| format!("navigation failed: {e}"))?;
 
-    // Re-inject mutation counter (new document clears it)
-    ensure_mutation_counter(page).await;
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        ensure_mutation_counter(page).await;
 
-    let settle_opts = SettleOptions {
-        timeout_ms: 2000,
-        ..SettleOptions::default()
-    };
-    let settle = settle_after_action(page, &settle_opts).await;
+        let settle_opts = SettleOptions {
+            timeout_ms: 2000,
+            ..SettleOptions::default()
+        };
+        let settle = settle_after_action(page, &settle_opts).await;
 
-    // Capture page state and sync registry
-    let page_state = capture_compact_page_state(page, true).await;
-    sync_page_registry(state, &page_state.title, &page_state.url);
+        let page_state = capture_compact_page_state(page, true).await;
+        sync_page_registry(state, &page_state.title, &page_state.url);
 
-    Ok(json!({
-        "url": page_state.url,
-        "title": page_state.title,
-        "settle": settle,
-        "state": page_state,
-    }))
+        let _ = state.narrator.bus.send(NarrationEvent::TabChanged {
+            url: page_state.url.clone(),
+            target_id: String::new(),
+            timestamp_ms: now_ms(),
+        });
+
+        Ok(json!({
+            "url": page_state.url,
+            "title": page_state.title,
+            "settle": settle,
+            "state": page_state,
+        }))
+    }
+    .await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 /// Go back in browser history.

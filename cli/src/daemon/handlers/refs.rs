@@ -3,6 +3,7 @@
 
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::inspection;
+use crate::daemon::narration::events::ActionKind;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
 use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
@@ -109,6 +110,25 @@ fn ref_resolution_json(ref_str: &str, node: &Value, resolution: &Value) -> Value
         "frameUrl": resolution.get("frameUrl").cloned().unwrap_or_else(|| node.get("frameUrl").cloned().unwrap_or(Value::Null)),
         "boundaries": resolution.get("boundaries").cloned().unwrap_or(json!([])),
     })
+}
+
+async fn ref_probe(
+    page: &Page,
+    state: &DaemonState,
+    action: ActionKind,
+    ref_str: &str,
+    resolution: &Value,
+    hint: Option<&str>,
+) -> crate::daemon::narration::ActionProbe {
+    let selector = resolution.get("selector").and_then(|value| value.as_str());
+    let mut probe = state
+        .narrator
+        .probe_action(page, action, selector, hint.or(Some(ref_str)))
+        .await;
+    if let Some(target) = &mut probe.target {
+        target.ref_id = Some(ref_str.to_string());
+    }
+    probe
 }
 
 pub async fn handle_snapshot(
@@ -224,28 +244,49 @@ pub async fn handle_click_ref(
         .ok_or_else(|| "missing required parameter: ref".to_string())?;
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let action = inspection::act_on_snapshot_node(page, &node, "click", &json!({})).await?;
-    let ok = action
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if !ok {
-        let reason = action
-            .get("reason")
-            .and_then(|value| value.as_str())
-            .unwrap_or("click failed");
-        return Err(format!("ref {ref_str} click failed: {reason}"));
-    }
+    let probe = ref_probe(
+        page,
+        state,
+        ActionKind::Click,
+        ref_str,
+        &resolution,
+        Some(ref_str),
+    )
+    .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
 
-    let (state_json, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state_json,
-        "settle": settle,
-        "clicked": {
-            "ref": ref_str,
-        },
-        "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
-    }))
+    let result = async {
+        let action = inspection::act_on_snapshot_node(page, &node, "click", &json!({})).await?;
+        let ok = action
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if !ok {
+            let reason = action
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("click failed");
+            return Err(format!("ref {ref_str} click failed: {reason}"));
+        }
+
+        let (state_json, settle) = settle_and_capture(page).await;
+        Ok(json!({
+            "state": state_json,
+            "settle": settle,
+            "clicked": {
+                "ref": ref_str,
+            },
+            "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
+        }))
+    }
+    .await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 pub async fn handle_hover_ref(
@@ -259,28 +300,49 @@ pub async fn handle_hover_ref(
         .ok_or_else(|| "missing required parameter: ref".to_string())?;
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let action = inspection::act_on_snapshot_node(page, &node, "hover", &json!({})).await?;
-    let ok = action
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if !ok {
-        let reason = action
-            .get("reason")
-            .and_then(|value| value.as_str())
-            .unwrap_or("hover failed");
-        return Err(format!("ref {ref_str} hover failed: {reason}"));
-    }
+    let probe = ref_probe(
+        page,
+        state,
+        ActionKind::Hover,
+        ref_str,
+        &resolution,
+        Some(ref_str),
+    )
+    .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
 
-    let (state_json, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state_json,
-        "settle": settle,
-        "hovered": {
-            "ref": ref_str,
-        },
-        "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
-    }))
+    let result = async {
+        let action = inspection::act_on_snapshot_node(page, &node, "hover", &json!({})).await?;
+        let ok = action
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if !ok {
+            let reason = action
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("hover failed");
+            return Err(format!("ref {ref_str} hover failed: {reason}"));
+        }
+
+        let (state_json, settle) = settle_and_capture(page).await;
+        Ok(json!({
+            "state": state_json,
+            "settle": settle,
+            "hovered": {
+                "ref": ref_str,
+            },
+            "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
+        }))
+    }
+    .await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 pub async fn handle_fill_ref(
@@ -310,42 +372,63 @@ pub async fn handle_fill_ref(
         .unwrap_or(false);
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let action = inspection::act_on_snapshot_node(
+    let probe = ref_probe(
         page,
-        &node,
-        "fill",
-        &json!({
-            "text": text,
-            "slowly": slowly,
-            "clearFirst": clear_first,
-            "submit": submit,
-        }),
+        state,
+        ActionKind::Type,
+        ref_str,
+        &resolution,
+        Some(text),
     )
-    .await?;
-    let ok = action
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-    if !ok {
-        let reason = action
-            .get("reason")
-            .and_then(|value| value.as_str())
-            .unwrap_or("fill failed");
-        return Err(format!("ref {ref_str} fill failed: {reason}"));
-    }
+    .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
 
-    let (state_json, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state_json,
-        "settle": settle,
-        "typed": {
-            "ref": ref_str,
-            "text_length": text.len(),
-            "slowly": slowly,
-            "submitted": submit,
-        },
-        "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
-    }))
+    let result = async {
+        let action = inspection::act_on_snapshot_node(
+            page,
+            &node,
+            "fill",
+            &json!({
+                "text": text,
+                "slowly": slowly,
+                "clearFirst": clear_first,
+                "submit": submit,
+            }),
+        )
+        .await?;
+        let ok = action
+            .get("ok")
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        if !ok {
+            let reason = action
+                .get("reason")
+                .and_then(|value| value.as_str())
+                .unwrap_or("fill failed");
+            return Err(format!("ref {ref_str} fill failed: {reason}"));
+        }
+
+        let (state_json, settle) = settle_and_capture(page).await;
+        Ok(json!({
+            "state": state_json,
+            "settle": settle,
+            "typed": {
+                "ref": ref_str,
+                "text_length": text.len(),
+                "slowly": slowly,
+                "submitted": submit,
+            },
+            "ref_resolution": ref_resolution_json(ref_str, &node, &resolution),
+        }))
+    }
+    .await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 #[cfg(test)]

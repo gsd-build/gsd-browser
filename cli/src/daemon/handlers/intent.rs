@@ -6,9 +6,10 @@
 //! `act` — composite handler: runs find_best internally, takes the top candidate,
 //! dispatches click (or focus for search_field), settles, and captures state.
 
-use super::interaction::handle_click;
+use super::interaction::click_selector;
 use crate::daemon::capture::capture_compact_page_state;
 use crate::daemon::inspection;
+use crate::daemon::narration::events::ActionKind;
 use crate::daemon::settle::{ensure_mutation_counter, settle_after_action};
 use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
@@ -449,46 +450,63 @@ pub async fn handle_act(page: &Page, state: &DaemonState, params: &Value) -> Res
         .ok_or_else(|| "act: top candidate has no selector".to_string())?;
     let score = top.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
 
-    // Phase 2: Execute the action
-    let action_performed;
-    if matches!(
-        intent,
-        "search_field" | "fill_email" | "fill_password" | "fill_username"
-    ) {
-        // Focus the search field instead of clicking
-        let focused =
-            inspection::perform_selector_action(page, state, selector, "focus", &json!({}), true)
-                .await?;
-        if !focused
-            .get("ok")
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false)
-        {
-            return Err(focused
-                .get("error")
-                .and_then(|value| value.as_str())
-                .unwrap_or("act: focus failed")
-                .to_string());
+    let probe = state
+        .narrator
+        .probe_action(page, ActionKind::Act, Some(selector), Some(intent))
+        .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
+
+    let result = async {
+        let action_performed;
+        if matches!(
+            intent,
+            "search_field" | "fill_email" | "fill_password" | "fill_username"
+        ) {
+            let focused = inspection::perform_selector_action(
+                page,
+                state,
+                selector,
+                "focus",
+                &json!({}),
+                true,
+            )
+            .await?;
+            if !focused
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(focused
+                    .get("error")
+                    .and_then(|value| value.as_str())
+                    .unwrap_or("act: focus failed")
+                    .to_string());
+            }
+            action_performed = "focus";
+        } else {
+            click_selector(page, state, selector).await?;
+            action_performed = "click";
         }
-        action_performed = "focus";
-    } else {
-        // Click the element
-        let click_params = json!({ "selector": selector });
-        handle_click(page, state, &click_params).await?;
-        action_performed = "click";
+
+        let (state, settle) = settle_and_capture(page).await;
+
+        Ok(json!({
+            "intent": intent,
+            "action": action_performed,
+            "candidate": top,
+            "score": score,
+            "state": state,
+            "settle": settle,
+        }))
     }
-
-    // Phase 3: Settle and capture
-    let (state, settle) = settle_and_capture(page).await;
-
-    Ok(json!({
-        "intent": intent,
-        "action": action_performed,
-        "candidate": top,
-        "score": score,
-        "state": state,
-        "settle": settle,
-    }))
+    .await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 #[cfg(test)]

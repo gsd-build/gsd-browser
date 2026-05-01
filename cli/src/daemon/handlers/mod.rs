@@ -11,6 +11,7 @@ pub mod har;
 pub mod inspect;
 pub mod intent;
 pub mod interaction;
+pub mod narration_cmds;
 pub mod navigate;
 pub mod network_mock;
 pub mod pages;

@@ -125,6 +125,7 @@ pub async fn start_daemon(
     identity_scope: Option<&str>,
     identity_key: Option<&str>,
     identity_project_id: Option<&str>,
+    no_narration_delay: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let session = validate_session_name(session)?;
 
@@ -203,6 +204,9 @@ pub async fn start_daemon(
     }
     if let Some(project_id) = identity_project_id {
         cmd.arg("--identity-project").arg(project_id);
+    }
+    if no_narration_delay {
+        cmd.arg("--no-narration-delay");
     }
 
     // In debug mode, inherit daemon logs so startup failures are visible.
@@ -479,6 +483,7 @@ pub async fn send_request(
     let identity_scope = std::env::var("GSD_BROWSER_IDENTITY_SCOPE").ok();
     let identity_key = std::env::var("GSD_BROWSER_IDENTITY_KEY").ok();
     let identity_project_id = std::env::var("GSD_BROWSER_IDENTITY_PROJECT").ok();
+    let no_narration_delay = std::env::var_os("GSD_BROWSER_NO_NARRATION_DELAY").is_some();
 
     // Ensure daemon is running
     if !is_daemon_alive(session) || !socket_path_for(session).exists() {
@@ -489,6 +494,7 @@ pub async fn send_request(
             identity_scope.as_deref(),
             identity_key.as_deref(),
             identity_project_id.as_deref(),
+            no_narration_delay,
         )
         .await?;
     }
@@ -517,6 +523,7 @@ pub async fn send_request(
                 identity_scope.as_deref(),
                 identity_key.as_deref(),
                 identity_project_id.as_deref(),
+                no_narration_delay,
             )
             .await?;
             send_once(method, params, session).await

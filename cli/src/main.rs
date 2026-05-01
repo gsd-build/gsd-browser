@@ -43,6 +43,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     identity_project: Option<String>,
 
+    /// Skip lead-time sleeps in narration
+    #[arg(long, global = true)]
+    no_narration_delay: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -397,6 +401,28 @@ enum Commands {
         #[arg(long)]
         scope: Option<String>,
     },
+    /// Set or clear the goal banner
+    Goal {
+        /// Goal text to display
+        text: Option<String>,
+        /// Clear the goal banner
+        #[arg(long)]
+        clear: bool,
+    },
+    /// Pause the agent before its next action
+    Pause,
+    /// Resume the agent
+    Resume,
+    /// Allow the next action through, then pause again
+    Step,
+    /// Abort the next action
+    Abort,
+    /// Open the live viewer for this session
+    View {
+        /// Print the URL without opening it
+        #[arg(long)]
+        print_only: bool,
+    },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
     /// Capture a debug bundle (screenshot, logs, timeline, accessibility tree)
@@ -675,6 +701,9 @@ async fn main() {
     if let Some(project_id) = cli.identity_project.as_deref() {
         std::env::set_var("GSD_BROWSER_IDENTITY_PROJECT", project_id);
     }
+    if cli.no_narration_delay {
+        std::env::set_var("GSD_BROWSER_NO_NARRATION_DELAY", "1");
+    }
 
     let result = match &cli.command {
         Commands::Serve {
@@ -692,6 +721,7 @@ async fn main() {
                 identity_scope.clone(),
                 identity_key.clone(),
                 identity_project.clone(),
+                cli.no_narration_delay,
             )
             .await
             {
@@ -840,6 +870,12 @@ async fn main() {
         } => cmd_fill_form(&cli, values, selector.as_deref(), *submit).await,
         Commands::FindBest { intent, scope } => cmd_find_best(&cli, intent, scope.as_deref()).await,
         Commands::Act { intent, scope } => cmd_act(&cli, intent, scope.as_deref()).await,
+        Commands::Goal { text, clear } => cmd_goal(&cli, text.as_deref(), *clear).await,
+        Commands::Pause => cmd_control(&cli, "pause").await,
+        Commands::Resume => cmd_control(&cli, "resume").await,
+        Commands::Step => cmd_control(&cli, "step").await,
+        Commands::Abort => cmd_control(&cli, "abort").await,
+        Commands::View { print_only } => cmd_view(&cli, *print_only).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
         Commands::VisualDiff {
@@ -999,6 +1035,7 @@ async fn cmd_daemon_start(cli: &Cli) -> CmdResult {
         cli.identity_scope.as_deref(),
         cli.identity_key.as_deref(),
         cli.identity_project.as_deref(),
+        cli.no_narration_delay,
     )
     .await?;
     if cli.json {
@@ -1748,6 +1785,98 @@ async fn cmd_act(cli: &Cli, intent: &str, scope: Option<&str>) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, output::format_text_act)
+}
+
+async fn cmd_goal(cli: &Cli, text: Option<&str>, clear: bool) -> CmdResult {
+    let params = if clear {
+        serde_json::json!({"clear": true})
+    } else if let Some(text) = text {
+        serde_json::json!({"text": text})
+    } else {
+        return Err("usage: gsd-browser goal <text> | gsd-browser goal --clear".into());
+    };
+    let resp = daemon_client::send_request(
+        "goal",
+        params,
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, format_text_goal)
+}
+
+async fn cmd_control(cli: &Cli, method: &str) -> CmdResult {
+    let resp = daemon_client::send_request(
+        method,
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, format_text_control)
+}
+
+async fn cmd_view(cli: &Cli, print_only: bool) -> CmdResult {
+    let resp = daemon_client::send_request(
+        "view",
+        serde_json::json!({}),
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    if let Some(err) = resp.error {
+        if cli.json {
+            eprintln!("{}", output::format_error_json(&err));
+        } else {
+            eprintln!("{}", output::format_error_text(&err));
+        }
+        std::process::exit(1);
+    }
+    let result = resp.result.ok_or("view response missing result")?;
+    let url = result
+        .get("url")
+        .and_then(|value| value.as_str())
+        .ok_or("view response missing url")?;
+    if cli.json {
+        println!("{}", output::format_json(&result));
+    } else {
+        println!("{url}");
+    }
+    if !print_only {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else if cfg!(target_os = "windows") {
+            "cmd"
+        } else {
+            "xdg-open"
+        };
+        let mut command = std::process::Command::new(opener);
+        if cfg!(target_os = "windows") {
+            command.args(["/C", "start", "", url]);
+        } else {
+            command.arg(url);
+        }
+        let _ = command.spawn();
+    }
+    Ok(())
+}
+
+fn format_text_goal(value: &serde_json::Value) -> String {
+    match value.get("goal") {
+        Some(serde_json::Value::Null) | None => "Goal cleared.".to_string(),
+        Some(goal) => format!("Goal: {}", goal.as_str().unwrap_or("")),
+    }
+}
+
+fn format_text_control(value: &serde_json::Value) -> String {
+    let control = value
+        .get("control")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    format!("Control: {control}")
 }
 
 async fn cmd_session_summary(cli: &Cli) -> CmdResult {

@@ -35,3 +35,10 @@ aes-gcm = { workspace = true }
 argon2 = { workspace = true }
 rand = { workspace = true }
 reqwest = { workspace = true }
+axum = { version = "0.7", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors"] }
+
+[dev-dependencies]
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
