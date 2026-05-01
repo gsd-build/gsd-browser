@@ -29,3 +29,4 @@ tmp/
 .bg-shell/
 .worktrees/
 .rewrite-backups/
+assets/gsd-browser-banner.*
