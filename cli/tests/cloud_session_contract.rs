@@ -99,6 +99,38 @@ fn cloud_tool_request_serializes_expanded_method_names() {
 }
 
 #[test]
+fn cloud_methods_manifest_contains_known_methods() {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_gsd-browser"))
+        .args(["cloud-methods", "--json"])
+        .output()
+        .expect("run gsd-browser cloud-methods");
+
+    assert!(
+        output.status.success(),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("manifest json");
+    assert_eq!(manifest["manifestVersion"], 1);
+    assert_eq!(manifest["runtimeMinVersion"], "0.1.19");
+
+    let methods = manifest["methods"].as_array().expect("methods");
+    let method_names: std::collections::BTreeSet<_> = methods
+        .iter()
+        .map(|method| method["name"].as_str().expect("method name"))
+        .collect();
+    assert!(method_names.contains("navigate"));
+    assert!(method_names.contains("snapshot"));
+    assert!(method_names.contains("click_ref"));
+    assert!(method_names.contains("visual_diff"));
+
+    for method in methods {
+        assert!(method["category"].as_str().expect("category").len() > 0);
+    }
+}
+
+#[test]
 fn cloud_refs_contract_uses_numeric_version_and_rendered_refs() {
     let refs = CloudRefs {
         version: 3,

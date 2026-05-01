@@ -3,6 +3,7 @@ pub mod assert_cmd;
 pub mod auth_vault;
 pub mod batch;
 pub mod cloud;
+pub mod cloud_manifest;
 pub mod cloud_methods;
 pub mod codegen;
 pub mod device;

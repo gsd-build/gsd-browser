@@ -754,6 +754,10 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "cloud_methods" => match handlers::cloud_manifest::handle_cloud_methods() {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
         "cloud_tool" => dispatch_cloud_tool(req, page, logs, state, browser).await,
         "cloud_user_input" => {
             match handlers::cloud::handle_cloud_user_input(page, state, &req.params).await {
