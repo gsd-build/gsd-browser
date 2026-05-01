@@ -23,7 +23,7 @@ use gsd_browser_common::{
     config::Config,
     identity::{identity_profile_dir, IdentityScope},
     ipc, pid_path_for, socket_path_for, state_dir, validate_session_name, DaemonRequest,
-    DaemonResponse, ERR_INTERNAL, ERR_METHOD_NOT_FOUND,
+    DaemonResponse, ERR_INTERNAL, ERR_INVALID_REQUEST, ERR_METHOD_NOT_FOUND,
 };
 use logs::DaemonLogs;
 use serde_json::json;
@@ -1154,7 +1154,7 @@ async fn dispatch_cloud_tool(
 ) -> DaemonResponse {
     let tool_req: CloudToolRequest = match serde_json::from_value(req.params.clone()) {
         Ok(value) => value,
-        Err(err) => return DaemonResponse::error(req.id, ERR_INTERNAL, err.to_string()),
+        Err(err) => return DaemonResponse::error(req.id, ERR_INVALID_REQUEST, err.to_string()),
     };
     let Some(method) = handlers::cloud_methods::cloud_tool_method(&tool_req.method) else {
         return DaemonResponse::error(
