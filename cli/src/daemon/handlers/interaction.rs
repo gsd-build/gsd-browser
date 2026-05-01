@@ -560,38 +560,48 @@ pub async fn handle_select_option(
 
     debug!("select_option: selector={selector} option={option}");
 
-    let action_result = inspection::perform_selector_action(
+    with_narration(
         page,
         state,
-        selector,
-        "select_option",
-        &json!({ "option": option }),
-        true,
-    )
-    .await?;
-    if !action_result
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        return Err(selector_action_error(
-            &action_result,
-            &format!("select_option failed for {selector}"),
-        ));
-    }
+        ActionKind::SelectOption,
+        Some(selector),
+        Some(option),
+        || async {
+            let action_result = inspection::perform_selector_action(
+                page,
+                state,
+                selector,
+                "select_option",
+                &json!({ "option": option }),
+                true,
+            )
+            .await?;
+            if !action_result
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(selector_action_error(
+                    &action_result,
+                    &format!("select_option failed for {selector}"),
+                ));
+            }
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "selected": {
-            "selector": selector,
-            "option": option,
-            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
-            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "selected": {
+                    "selector": selector,
+                    "option": option,
+                    "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+                    "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+                },
+                "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
+            }))
         },
-        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
-    }))
+    )
+    .await
 }
 
 // ── Set Checked ──
