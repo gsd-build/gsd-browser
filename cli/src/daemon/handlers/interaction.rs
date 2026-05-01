@@ -135,7 +135,11 @@ pub async fn handle_click(
     result
 }
 
-async fn click_selector(page: &Page, state: &DaemonState, selector: &str) -> Result<Value, String> {
+pub(super) async fn click_selector(
+    page: &Page,
+    state: &DaemonState,
+    selector: &str,
+) -> Result<Value, String> {
     debug!("click: selector={selector}");
 
     let resolved = inspection::resolve_selector_target(page, state, selector, true).await?;
