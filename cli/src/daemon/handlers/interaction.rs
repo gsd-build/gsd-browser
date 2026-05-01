@@ -297,7 +297,11 @@ pub async fn handle_type_text(
 
 /// Handle `press` command — press a key or key combination.
 /// Params: { key: string }
-pub async fn handle_press(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_press(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let key = params
         .get("key")
         .and_then(|v| v.as_str())
@@ -305,15 +309,12 @@ pub async fn handle_press(page: &Page, params: &Value) -> Result<Value, String> 
 
     debug!("press: key={key}");
 
-    if key.contains('+') {
-        // Key combination: e.g. "Meta+A", "Control+Shift+T"
-        press_combo(page, key).await?;
-    } else {
-        // Single key
-        // We use JS dispatchEvent for keys since chromiumoxide's press_key
-        // is on Element, not Page. Use CDP Input.dispatchKeyEvent via JS.
-        let js = format!(
-            r#"(() => {{
+    with_narration(page, state, ActionKind::Press, None, Some(key), || async {
+        if key.contains('+') {
+            press_combo(page, key).await?;
+        } else {
+            let js = format!(
+                r#"(() => {{
                 const key = {key_json};
                 const event = new KeyboardEvent('keydown', {{key, bubbles: true}});
                 document.activeElement ? document.activeElement.dispatchEvent(event) : document.dispatchEvent(event);
@@ -321,20 +322,22 @@ pub async fn handle_press(page: &Page, params: &Value) -> Result<Value, String> 
                 document.activeElement ? document.activeElement.dispatchEvent(up) : document.dispatchEvent(up);
                 return true;
             }})()"#,
-            key_json = serde_json::to_string(key).unwrap()
-        );
-        timeout(CDP_TIMEOUT, page.evaluate_expression(&js))
-            .await
-            .map_err(|_| format!("press timed out for key: {key}"))?
-            .map_err(|e| format!("press failed for key {key}: {e}"))?;
-    }
+                key_json = serde_json::to_string(key).unwrap()
+            );
+            timeout(CDP_TIMEOUT, page.evaluate_expression(&js))
+                .await
+                .map_err(|_| format!("press timed out for key: {key}"))?
+                .map_err(|e| format!("press failed for key {key}: {e}"))?;
+        }
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "pressed": key,
-    }))
+        let (state, settle) = settle_and_capture(page).await;
+        Ok(json!({
+            "state": state,
+            "settle": settle,
+            "pressed": key,
+        }))
+    })
+    .await
 }
 
 async fn press_combo(page: &Page, combo: &str) -> Result<(), String> {

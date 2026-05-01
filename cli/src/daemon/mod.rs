@@ -804,7 +804,7 @@ pub(crate) async fn dispatch_inner(
                 json!({"retryHint": "Check selector targets an input/textarea element"}),
             ),
         },
-        "press" => match handlers::interaction::handle_press(page, &req.params).await {
+        "press" => match handlers::interaction::handle_press(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
