@@ -57,7 +57,16 @@ fn cloud_frame_contract_includes_viewport_metadata() {
     assert_eq!(value["sequence"], 7);
     assert_eq!(value["viewportWidth"], 640);
     assert_eq!(value["viewportHeight"], 360);
+    assert_eq!(value["viewportCssWidth"], 640);
+    assert_eq!(value["viewportCssHeight"], 360);
+    assert_eq!(value["capturePixelWidth"], 1280);
+    assert_eq!(value["capturePixelHeight"], 720);
     assert_eq!(value["devicePixelRatio"], 2.0);
+    assert_eq!(value["captureScaleX"], 2.0);
+    assert_eq!(value["captureScaleY"], 2.0);
+    assert_eq!(value["encodedBytes"], 3);
+    assert_eq!(value["quality"], 70);
+    assert_eq!(value["capturePixelRatio"], 2.0);
 }
 
 #[test]

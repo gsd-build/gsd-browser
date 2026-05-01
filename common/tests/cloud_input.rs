@@ -38,6 +38,8 @@ fn cloud_user_input_rejects_invalid_coordinate_space() {
 fn cloud_user_input_rejects_missing_or_unknown_kind() {
     assert!(serde_json::from_value::<CloudUserInput>(json!({ "phase": "click" })).is_err());
     assert!(serde_json::from_value::<CloudUserInput>(json!({ "kind": "tap" })).is_err());
+    assert!(serde_json::from_value::<CloudUserInput>(json!({ "kind": "ref_action" })).is_err());
+    assert!(serde_json::from_value::<CloudUserInput>(json!({ "kind": "viewport" })).is_err());
 }
 
 #[test]
@@ -57,6 +59,27 @@ fn cloud_user_input_rejects_invalid_pointer_phase_and_click_count() {
         "clickCount": -1,
         "x": 1,
         "y": 1
+    }))
+    .is_err());
+}
+
+#[test]
+fn cloud_user_input_validates_key_phase() {
+    assert!(serde_json::from_value::<CloudUserInput>(json!({
+        "kind": "key",
+        "phase": "press",
+        "key": "Enter"
+    }))
+    .is_ok());
+    assert!(serde_json::from_value::<CloudUserInput>(json!({
+        "kind": "key",
+        "key": "Enter"
+    }))
+    .is_err());
+    assert!(serde_json::from_value::<CloudUserInput>(json!({
+        "kind": "key",
+        "phase": "repeat",
+        "key": "Enter"
     }))
     .is_err());
 }

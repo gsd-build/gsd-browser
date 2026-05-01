@@ -235,6 +235,11 @@ impl CloudUserInput {
             }
             "wheel" => {}
             "key" => {
+                match self.phase.as_deref() {
+                    Some("down" | "up" | "press") => {}
+                    Some(other) => return Err(format!("invalid key phase: {other}")),
+                    None => return Err("key input requires phase".to_string()),
+                }
                 if self.key.is_none() {
                     return Err("key input requires key".to_string());
                 }
@@ -253,7 +258,9 @@ impl CloudUserInput {
                     return Err("navigation url must be http or https".to_string());
                 }
             }
-            "ref_action" | "viewport" => {}
+            "ref_action" | "viewport" => {
+                return Err(format!("unsupported user input kind: {}", self.kind));
+            }
             other => return Err(format!("unsupported user input kind: {other}")),
         }
         Ok(())

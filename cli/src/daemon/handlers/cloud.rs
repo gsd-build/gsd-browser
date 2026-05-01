@@ -498,7 +498,7 @@ pub async fn handle_cloud_user_input(
                         x,
                         y,
                         MouseButton::None,
-                        0,
+                        buttons,
                         0,
                         modifiers,
                         None,
