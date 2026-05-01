@@ -3,10 +3,12 @@ name: gsd-browser
 description: >
   Native Rust browser automation CLI for AI agents. Use when the user needs to
   interact with websites, navigate pages, fill forms, click buttons, take
-  screenshots, extract structured data, run assertions, test web apps, mock
-  network requests, or automate any browser task. Triggers include "open a
-  website", "fill out a form", "take a screenshot", "scrape data", "test this
-  web app", "login to a site", "visual regression test", or any task requiring
+  screenshots, share a live browser view, narrate browser actions, extract
+  structured data, run assertions, test web apps, mock network requests, or
+  automate any browser task. Triggers include "open a website", "fill out a
+  form", "take a screenshot", "show me the browser", "share the screen",
+  "pause the browser", "step through this", "scrape data", "test this web app",
+  "login to a site", "visual regression test", or any task requiring
   programmatic web interaction.
 allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 ---
@@ -37,6 +39,8 @@ gsd-browser snapshot  # REQUIRED - old refs are now stale
 
 **Command chaining:** Use `&&` when you don't need intermediate output. Run separately when you need to parse output first (e.g., snapshot to discover refs, then interact).
 
+**Use the live viewer when the user wants to watch or direct the browser.** `gsd-browser view` opens a localhost viewer with live frames, narrated action history, ref overlays, and pause/step/resume/abort controls. Keep using CLI commands for actions; the viewer is the shared screen and control surface.
+
 **Global options** available on all commands:
 
 | Flag | Purpose |
@@ -45,6 +49,7 @@ gsd-browser snapshot  # REQUIRED - old refs are now stale
 | `--browser-path <path>` | Path to Chrome/Chromium |
 | `--cdp-url <url>` | Attach to an already-running Chrome instance |
 | `--session <name>` | Named session for parallel instances |
+| `--no-narration-delay` | Skip narration lead-time sleeps while keeping history/events |
 
 </essential_principles>
 
@@ -55,6 +60,7 @@ Based on what the user needs, read the appropriate workflow:
 | User intent | Workflow |
 |-------------|----------|
 | Navigate, click, type, fill forms, interact with pages | `workflows/navigate-and-interact.md` |
+| Share the browser screen, narrate actions, pause/step/resume/abort | `workflows/live-viewer-and-narration.md` |
 | Scrape data, extract content, read page structure | `workflows/scrape-and-extract.md` |
 | Test pages, run assertions, visual regression, mock network | `workflows/test-and-assert.md` |
 | Debug issues, check logs, diagnose problems | `workflows/debug-and-diagnose.md` |
@@ -68,7 +74,7 @@ Based on what the user needs, read the appropriate workflow:
 
 All domain knowledge in `references/`:
 
-**Commands:** command-reference.md (all 63 commands with exact syntax)
+**Commands:** command-reference.md (complete command syntax)
 **Snapshots:** snapshot-and-refs.md (versioned refs, snapshot modes)
 **Intents:** semantic-intents.md (15 predefined intents for find-best/act)
 **Errors:** error-recovery.md (common errors and fixes)
@@ -81,6 +87,7 @@ All domain knowledge in `references/`:
 | Workflow | Purpose |
 |----------|---------|
 | navigate-and-interact.md | Page navigation, clicking, typing, forms, intents |
+| live-viewer-and-narration.md | Live shared viewer, narrated history, refs overlay, controls |
 | scrape-and-extract.md | Data extraction, accessibility tree, page source |
 | test-and-assert.md | Assertions, visual regression, network mocking, test generation |
 | debug-and-diagnose.md | Console/network logs, timeline, debug bundles |

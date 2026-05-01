@@ -353,6 +353,7 @@ SKILL_FILES=(
   "references/error-recovery.md"
   "workflows/scrape-and-extract.md"
   "workflows/setup-and-configure.md"
+  "workflows/live-viewer-and-narration.md"
   "workflows/navigate-and-interact.md"
   "workflows/test-and-assert.md"
   "workflows/debug-and-diagnose.md"

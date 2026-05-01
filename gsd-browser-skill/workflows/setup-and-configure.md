@@ -116,7 +116,24 @@ gsd-browser daemon stop       # Stop daemon and Chrome
 gsd-browser daemon start      # Explicit start (rarely needed)
 ```
 
-**Step 7: CI/CD usage**
+**Step 7: Live viewer setup**
+
+Open the narrated shared-screen viewer for a session:
+
+```bash
+gsd-browser --session demo navigate https://example.com
+gsd-browser --session demo view
+```
+
+Use `--print-only` when another tool or person will open the URL:
+
+```bash
+gsd-browser --session demo view --print-only
+```
+
+The viewer runs on localhost and attaches to the session daemon. It shows live browser frames, action history, refs overlay, and pause/step/resume/abort controls.
+
+**Step 8: CI/CD usage**
 
 For CI pipelines, ensure headless mode and configure paths:
 

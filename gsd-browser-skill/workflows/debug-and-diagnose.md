@@ -47,7 +47,18 @@ gsd-browser timeline
 
 Shows a chronological log of all actions taken in the session — useful for understanding what happened before an error.
 
-**Step 6: Session summary**
+**Step 6: Review narrated viewer history**
+
+Use the live viewer when a human needs to inspect the shared browser state, action history, target overlays, or failure markers.
+
+```bash
+gsd-browser view
+gsd-browser view --history
+```
+
+The normal viewer hydrates recent history on reload. `view --history` opens a history-focused view without running a new page action.
+
+**Step 7: Session summary**
 
 ```bash
 gsd-browser session-summary
@@ -55,7 +66,7 @@ gsd-browser session-summary
 
 Diagnostic summary: daemon status, browser info, active page, session duration, action count.
 
-**Step 7: Export for offline analysis**
+**Step 8: Export for offline analysis**
 
 ```bash
 gsd-browser har-export --filename "debug-session.har"     # Network as HAR 1.2
@@ -63,7 +74,7 @@ gsd-browser trace-start && gsd-browser trace-stop         # CDP performance trac
 gsd-browser screenshot --output "debug-screenshot.png"    # Visual state
 ```
 
-**Step 8: Investigate specific elements**
+**Step 9: Investigate specific elements**
 
 ```bash
 gsd-browser find --text "Error"                    # Find error messages
@@ -82,6 +93,7 @@ gsd-browser eval 'document.querySelector(".error").textContent'  # Extract speci
 # Something failed — get the full picture
 gsd-browser debug-bundle
 gsd-browser timeline              # What happened before the failure?
+gsd-browser view --history        # Human-readable narrated history
 gsd-browser console               # Any JS errors?
 gsd-browser network               # Any failed requests?
 ```
