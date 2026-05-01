@@ -3,7 +3,7 @@ use serde::Serialize;
 use serde_json::Value;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 const REFS_INTERVAL: Duration = Duration::from_millis(1500);
 const REFS_JS: &str = r#"JSON.stringify((() => {
@@ -44,14 +44,26 @@ pub struct RefInfo {
     pub h: f64,
 }
 
-pub async fn run_refs_loop(page: Arc<Page>, tx: broadcast::Sender<RefsMessage>) {
+pub async fn run_refs_loop(
+    mut page_rx: watch::Receiver<Arc<Page>>,
+    tx: broadcast::Sender<RefsMessage>,
+) {
     let mut ticker = tokio::time::interval(REFS_INTERVAL);
     loop {
-        ticker.tick().await;
+        tokio::select! {
+            _ = ticker.tick() => {}
+            changed = page_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+                continue;
+            }
+        }
         if tx.receiver_count() == 0 {
             continue;
         }
 
+        let page = page_rx.borrow().clone();
         let result = match page.evaluate_expression(REFS_JS).await {
             Ok(result) => result,
             Err(_) => continue,

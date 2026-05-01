@@ -5,9 +5,9 @@ pub mod policy;
 pub mod probe;
 
 #[allow(unused_imports)]
-pub use events::{now_ms, ActionKind, BoundingBox, ControlState, NarrationEvent, TargetInfo};
-#[allow(unused_imports)]
 pub use control::{AbortedError, Control};
+#[allow(unused_imports)]
+pub use events::{now_ms, ActionKind, BoundingBox, ControlState, NarrationEvent, TargetInfo};
 
 use crate::daemon::narration::history::History;
 use crate::daemon::narration::policy::lead_for;
@@ -48,8 +48,7 @@ impl Narrator {
     }
 
     pub fn activate(&self) {
-        self.active
-            .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.active.store(true, std::sync::atomic::Ordering::SeqCst);
     }
 
     pub fn is_active(&self) -> bool {

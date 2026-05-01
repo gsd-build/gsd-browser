@@ -6,9 +6,10 @@ pub mod viewer_html;
 pub mod ws;
 
 use crate::daemon::narration::Narrator;
+use crate::daemon::state::DaemonState;
 use chromiumoxide::Page;
 use std::sync::Arc;
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{broadcast, watch, Mutex};
 use tokio::task::JoinHandle;
 
 pub struct ViewServerHandle {
@@ -23,6 +24,7 @@ pub struct ViewServerHandle {
 const PORT_RANGE: std::ops::RangeInclusive<u16> = 7777..=7876;
 
 pub async fn start_for_session(
+    state: Arc<DaemonState>,
     narrator: Arc<Narrator>,
     page: Arc<Page>,
     browser: Arc<Mutex<chromiumoxide::Browser>>,
@@ -31,13 +33,14 @@ pub async fn start_for_session(
 
     let (frames_tx, _) = broadcast::channel(64);
     let (refs_tx, _) = broadcast::channel(16);
+    let (active_page_tx, active_page_rx) = watch::channel(page.clone());
 
-    let state = ViewState {
+    let view_state = ViewState {
         narrator: narrator.clone(),
         frames: frames_tx.clone(),
         refs: refs_tx.clone(),
     };
-    let app = router(state);
+    let app = router(view_state);
 
     let mut listener: Option<tokio::net::TcpListener> = None;
     let mut chosen: Option<u16> = None;
@@ -58,20 +61,20 @@ pub async fn start_for_session(
         let _ = axum::serve(listener, app).await;
     });
 
-    let cap_page = page.clone();
+    let cap_page_rx = active_page_rx.clone();
     let cap_tx = frames_tx.clone();
     let capture_task = tokio::spawn(async move {
-        crate::daemon::view::capture::run_capture_loop(cap_page, cap_tx).await;
+        crate::daemon::view::capture::run_capture_manager(cap_page_rx, cap_tx).await;
     });
 
-    let refs_page = page.clone();
+    let refs_page_rx = active_page_rx.clone();
     let refs_tx2 = refs_tx.clone();
     let refs_task = tokio::spawn(async move {
-        crate::daemon::view::refs_poller::run_refs_loop(refs_page, refs_tx2).await;
+        crate::daemon::view::refs_poller::run_refs_loop(refs_page_rx, refs_tx2).await;
     });
 
     let target_follow_task = tokio::spawn(async move {
-        crate::daemon::view::target_follow::run_target_follow(browser).await;
+        crate::daemon::view::target_follow::run_target_follow(browser, state, active_page_tx).await;
     });
 
     narrator.activate();

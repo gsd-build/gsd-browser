@@ -89,15 +89,21 @@ pub fn label_for(action: ActionKind, target: Option<&TargetInfo>, hint: Option<&
             };
             format!("typing \"{}\"", display)
         }
-        ActionKind::Press => format!("pressing {}", hint.unwrap_or("")).trim().to_string(),
-        ActionKind::Scroll => format!("scrolling {}", hint.unwrap_or("")).trim().to_string(),
+        ActionKind::Press => format!("pressing {}", hint.unwrap_or(""))
+            .trim()
+            .to_string(),
+        ActionKind::Scroll => format!("scrolling {}", hint.unwrap_or(""))
+            .trim()
+            .to_string(),
         ActionKind::Navigate => format!("navigating to {}", hint.unwrap_or(""))
             .trim()
             .to_string(),
         ActionKind::SelectOption => format!("selecting option {}", hint.unwrap_or(""))
             .trim()
             .to_string(),
-        ActionKind::SetChecked => format!("setting checkbox {}", target_desc).trim().to_string(),
+        ActionKind::SetChecked => format!("setting checkbox {}", target_desc)
+            .trim()
+            .to_string(),
         ActionKind::Drag => format!("dragging {}", target_desc).trim().to_string(),
         ActionKind::UploadFile => format!("uploading to {}", target_desc).trim().to_string(),
         ActionKind::Act => format!("act: {}", hint.unwrap_or("")).trim().to_string(),

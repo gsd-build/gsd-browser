@@ -64,6 +64,7 @@ fn now_epoch_secs() -> f64 {
 /// An entry in the page registry — one per open browser page/tab.
 pub struct PageEntry {
     pub id: u64,
+    pub target_id: String,
     pub page: Arc<Page>,
     pub title: String,
     pub url: String,
@@ -89,8 +90,10 @@ impl PageRegistry {
     pub fn register(&mut self, page: Arc<Page>, title: String, url: String) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
+        let target_id = page.target_id().as_ref().to_string();
         self.entries.push(PageEntry {
             id,
+            target_id,
             page,
             title,
             url,
@@ -100,6 +103,13 @@ impl PageRegistry {
             self.active_page_id = id;
         }
         id
+    }
+
+    pub fn find_by_target_id(&self, target_id: &str) -> Option<u64> {
+        self.entries
+            .iter()
+            .find(|entry| entry.target_id == target_id)
+            .map(|entry| entry.id)
     }
 
     /// Get the active page (cloned Arc).

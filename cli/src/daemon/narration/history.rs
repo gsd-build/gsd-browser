@@ -24,13 +24,7 @@ impl History {
 
     pub fn recent(&self, n: usize) -> Vec<NarrationEvent> {
         let take = n.min(self.events.len());
-        self.events
-            .iter()
-            .rev()
-            .take(take)
-            .rev()
-            .cloned()
-            .collect()
+        self.events.iter().rev().take(take).rev().cloned().collect()
     }
 
     #[cfg(test)]

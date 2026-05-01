@@ -244,7 +244,15 @@ pub async fn handle_click_ref(
         .ok_or_else(|| "missing required parameter: ref".to_string())?;
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let probe = ref_probe(page, state, ActionKind::Click, ref_str, &resolution, Some(ref_str)).await;
+    let probe = ref_probe(
+        page,
+        state,
+        ActionKind::Click,
+        ref_str,
+        &resolution,
+        Some(ref_str),
+    )
+    .await;
     state
         .narrator
         .emit_pre(&probe)
@@ -292,7 +300,15 @@ pub async fn handle_hover_ref(
         .ok_or_else(|| "missing required parameter: ref".to_string())?;
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let probe = ref_probe(page, state, ActionKind::Hover, ref_str, &resolution, Some(ref_str)).await;
+    let probe = ref_probe(
+        page,
+        state,
+        ActionKind::Hover,
+        ref_str,
+        &resolution,
+        Some(ref_str),
+    )
+    .await;
     state
         .narrator
         .emit_pre(&probe)
@@ -356,7 +372,15 @@ pub async fn handle_fill_ref(
         .unwrap_or(false);
 
     let (node, resolution) = resolve_ref(page, state, ref_str).await?;
-    let probe = ref_probe(page, state, ActionKind::Type, ref_str, &resolution, Some(text)).await;
+    let probe = ref_probe(
+        page,
+        state,
+        ActionKind::Type,
+        ref_str,
+        &resolution,
+        Some(text),
+    )
+    .await;
     state
         .narrator
         .emit_pre(&probe)

@@ -63,7 +63,10 @@ async fn click_produces_intent_then_complete() {
         collect.is_ok(),
         "timed out collecting narration events; saw {seen_types:?}"
     );
-    assert!(got_intent, "did not receive intent event; saw {seen_types:?}");
+    assert!(
+        got_intent,
+        "did not receive intent event; saw {seen_types:?}"
+    );
     assert!(
         got_complete,
         "did not receive complete event; saw {seen_types:?}"

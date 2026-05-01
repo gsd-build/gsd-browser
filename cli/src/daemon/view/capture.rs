@@ -1,10 +1,9 @@
 use chromiumoxide::cdp::browser_protocol::page::{
-    EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat,
-    StartScreencastParams,
+    EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
 };
 use chromiumoxide::Page;
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 #[derive(Clone, serde::Serialize)]
 pub struct FrameMessage {
@@ -44,7 +43,9 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
     };
 
     while let Some(evt) = futures::StreamExt::next(&mut events).await {
-        let _ = page.execute(ScreencastFrameAckParams::new(evt.session_id)).await;
+        let _ = page
+            .execute(ScreencastFrameAckParams::new(evt.session_id))
+            .await;
         let data: String = evt.data.clone().into();
         let msg = FrameMessage {
             ty: "frame",
@@ -56,5 +57,36 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
             timestamp: crate::daemon::narration::events::now_ms(),
         };
         let _ = frames_tx.send(msg);
+    }
+}
+
+pub async fn run_capture_manager(
+    mut page_rx: watch::Receiver<Arc<Page>>,
+    frames_tx: broadcast::Sender<FrameMessage>,
+) {
+    let mut task = tokio::spawn(run_capture_loop(
+        page_rx.borrow().clone(),
+        frames_tx.clone(),
+    ));
+
+    loop {
+        tokio::select! {
+            changed = page_rx.changed() => {
+                if changed.is_err() {
+                    task.abort();
+                    break;
+                }
+                task.abort();
+                task = tokio::spawn(run_capture_loop(page_rx.borrow().clone(), frames_tx.clone()));
+            }
+            result = &mut task => {
+                if let Err(err) = result {
+                    if !err.is_cancelled() {
+                        tracing::warn!("[view] capture task ended: {err}");
+                    }
+                }
+                task = tokio::spawn(run_capture_loop(page_rx.borrow().clone(), frames_tx.clone()));
+            }
+        }
     }
 }

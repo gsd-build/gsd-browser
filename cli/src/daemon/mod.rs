@@ -130,7 +130,7 @@ fn cleanup_browser_profile_singletons(profile_dir: &Path) {
     }
 }
 
-async fn set_default_viewport(page: &Page) {
+pub(crate) async fn set_default_viewport(page: &Page) {
     let params = SetDeviceMetricsOverrideParams::new(
         DEFAULT_VIEWPORT_WIDTH,
         DEFAULT_VIEWPORT_HEIGHT,
@@ -548,7 +548,7 @@ async fn dispatch(
     req: &DaemonRequest,
     page: &Page,
     logs: &DaemonLogs,
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
     browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     // Determine if this method should be timeline-recorded
@@ -722,7 +722,7 @@ pub(crate) async fn dispatch_inner(
     req: &DaemonRequest,
     page: &Page,
     logs: &DaemonLogs,
-    state: &DaemonState,
+    state: &Arc<DaemonState>,
     browser: &Arc<tokio::sync::Mutex<Browser>>,
 ) -> DaemonResponse {
     match req.method.as_str() {
@@ -889,10 +889,12 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "upload_file" => match handlers::interaction::handle_upload_file(page, state, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "upload_file" => {
+            match handlers::interaction::handle_upload_file(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "screenshot" => match handlers::screenshot::handle_screenshot(page, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(

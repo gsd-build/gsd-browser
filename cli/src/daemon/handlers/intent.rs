@@ -467,9 +467,15 @@ pub async fn handle_act(page: &Page, state: &DaemonState, params: &Value) -> Res
             intent,
             "search_field" | "fill_email" | "fill_password" | "fill_username"
         ) {
-            let focused =
-                inspection::perform_selector_action(page, state, selector, "focus", &json!({}), true)
-                    .await?;
+            let focused = inspection::perform_selector_action(
+                page,
+                state,
+                selector,
+                "focus",
+                &json!({}),
+                true,
+            )
+            .await?;
             if !focused
                 .get("ok")
                 .and_then(|value| value.as_bool())

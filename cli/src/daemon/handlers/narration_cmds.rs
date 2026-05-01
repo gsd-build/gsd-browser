@@ -50,7 +50,7 @@ pub async fn handle_view_status(state: &DaemonState) -> Result<Value, String> {
 }
 
 pub async fn handle_view(
-    state: &DaemonState,
+    state: &std::sync::Arc<DaemonState>,
     page: &chromiumoxide::Page,
     browser: &std::sync::Arc<tokio::sync::Mutex<chromiumoxide::Browser>>,
 ) -> Result<Value, String> {
@@ -60,6 +60,7 @@ pub async fn handle_view(
     }
 
     let handle = crate::daemon::view::start_for_session(
+        state.clone(),
         state.narrator.clone(),
         std::sync::Arc::new(page.clone()),
         browser.clone(),
