@@ -26,3 +26,6 @@ vendor/
 coverage/
 .cache/
 tmp/
+.bg-shell/
+.worktrees/
+.rewrite-backups/
