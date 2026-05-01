@@ -392,7 +392,7 @@ pub async fn handle_cloud_tool(
         "type" => handlers::interaction::handle_type_text(page, state, &req.params).await,
         "press" => handlers::interaction::handle_press(page, state, &req.params).await,
         "hover" => handlers::interaction::handle_hover(page, state, &req.params).await,
-        "scroll" => handlers::interaction::handle_scroll(page, &req.params).await,
+        "scroll" => handlers::interaction::handle_scroll(page, state, &req.params).await,
         "snapshot" => handlers::refs::handle_snapshot(page, state, &req.params).await,
         "get_ref" => handlers::refs::handle_get_ref(state, &req.params),
         "click_ref" => handlers::refs::handle_click_ref(page, state, &req.params).await,

@@ -817,7 +817,7 @@ pub(crate) async fn dispatch_inner(
                 json!({"retryHint": "Check selector is valid and element exists"}),
             ),
         },
-        "scroll" => match handlers::interaction::handle_scroll(page, &req.params).await {
+        "scroll" => match handlers::interaction::handle_scroll(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },

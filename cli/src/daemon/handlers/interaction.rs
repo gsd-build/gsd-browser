@@ -470,7 +470,11 @@ pub async fn handle_hover(
 
 /// Handle `scroll` command — scroll the page and return position.
 /// Params: { direction: "up"|"down", amount?: i32 }
-pub async fn handle_scroll(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_scroll(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let direction = params
         .get("direction")
         .and_then(|v| v.as_str())
@@ -489,8 +493,9 @@ pub async fn handle_scroll(page: &Page, params: &Value) -> Result<Value, String>
 
     debug!("scroll: direction={direction} amount={scroll_amount}");
 
-    let js = format!(
-        r#"(() => {{
+    with_narration(page, state, ActionKind::Scroll, None, Some(direction), || async {
+        let js = format!(
+            r#"(() => {{
             window.scrollBy(0, {scroll_amount});
             return {{
                 x: Math.round(window.scrollX),
@@ -499,39 +504,40 @@ pub async fn handle_scroll(page: &Page, params: &Value) -> Result<Value, String>
                 viewport_height: window.innerHeight,
             }};
         }})()"#
-    );
+        );
 
-    let result = timeout(CDP_TIMEOUT, page.evaluate_expression(&js))
-        .await
-        .map_err(|_| "scroll timed out".to_string())?
-        .map_err(|e| format!("scroll failed: {e}"))?;
+        let result = timeout(CDP_TIMEOUT, page.evaluate_expression(&js))
+            .await
+            .map_err(|_| "scroll timed out".to_string())?
+            .map_err(|e| format!("scroll failed: {e}"))?;
 
-    let scroll_info = result.value().cloned().unwrap_or(json!({}));
-    let scroll_y = scroll_info.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let scroll_height = scroll_info
-        .get("height")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(1.0);
-    let viewport_height = scroll_info
-        .get("viewport_height")
-        .and_then(|v| v.as_f64())
-        .unwrap_or(1.0);
-    let max_scroll = (scroll_height - viewport_height).max(1.0);
-    let percentage = ((scroll_y / max_scroll) * 100.0).round().min(100.0);
+        let scroll_info = result.value().cloned().unwrap_or(json!({}));
+        let scroll_y = scroll_info.get("y").and_then(|v| v.as_f64()).unwrap_or(0.0);
+        let scroll_height = scroll_info
+            .get("height")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        let viewport_height = scroll_info
+            .get("viewport_height")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0);
+        let max_scroll = (scroll_height - viewport_height).max(1.0);
+        let percentage = ((scroll_y / max_scroll) * 100.0).round().min(100.0);
 
-    // Capture page state (scroll is mostly synchronous, but capture anyway)
-    let state = capture_compact_page_state(page, false).await;
+        let state = capture_compact_page_state(page, false).await;
 
-    Ok(json!({
-        "state": state,
-        "scroll": {
-            "x": scroll_info.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
-            "y": scroll_y,
-            "height": scroll_height,
-            "viewport_height": viewport_height,
-            "percentage": percentage,
-        },
-    }))
+        Ok(json!({
+            "state": state,
+            "scroll": {
+                "x": scroll_info.get("x").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                "y": scroll_y,
+                "height": scroll_height,
+                "viewport_height": viewport_height,
+                "percentage": percentage,
+            },
+        }))
+    })
+    .await
 }
 
 // ── Select Option ──

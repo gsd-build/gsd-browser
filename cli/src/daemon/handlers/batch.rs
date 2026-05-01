@@ -112,7 +112,7 @@ async fn dispatch_step(
         "fill_ref" => handlers::refs::handle_fill_ref(page, state, step).await,
         "hover" => handlers::interaction::handle_hover(page, state, step).await,
         "hover_ref" => handlers::refs::handle_hover_ref(page, state, step).await,
-        "scroll" => handlers::interaction::handle_scroll(page, step).await,
+        "scroll" => handlers::interaction::handle_scroll(page, state, step).await,
         "press" => handlers::interaction::handle_press(page, state, step).await,
         "snapshot" => handlers::refs::handle_snapshot(page, state, step).await,
         "diff" => handlers::assert_cmd::handle_diff(page, state, step).await,
