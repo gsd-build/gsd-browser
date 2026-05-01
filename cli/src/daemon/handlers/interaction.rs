@@ -15,6 +15,7 @@ use chromiumoxide::layout::Point;
 use chromiumoxide::Page;
 use gsd_browser_common::types::SettleOptions;
 use serde_json::{json, Value};
+use std::future::Future;
 use std::time::Duration;
 use tokio::time::timeout;
 use tracing::debug;
@@ -62,6 +63,33 @@ fn selector_action_meta(selector: &str, result: &Value) -> Value {
         "role": target.get("role").cloned().unwrap_or(Value::Null),
         "name": target.get("name").cloned().unwrap_or(Value::Null),
     })
+}
+
+async fn with_narration<F, Fut>(
+    page: &Page,
+    state: &DaemonState,
+    action: ActionKind,
+    selector: Option<&str>,
+    hint: Option<&str>,
+    body: F,
+) -> Result<Value, String>
+where
+    F: FnOnce() -> Fut,
+    Fut: Future<Output = Result<Value, String>>,
+{
+    let probe = state
+        .narrator
+        .probe_action(page, action, selector, hint)
+        .await;
+    state
+        .narrator
+        .emit_pre(&probe)
+        .await
+        .map_err(|_| "aborted".to_string())?;
+    state.narrator.sleep_lead(&probe).await;
+    let result = body().await;
+    state.narrator.emit_post(&probe, &result).await;
+    result
 }
 
 // ── Click ──
@@ -212,47 +240,57 @@ pub async fn handle_type_text(
         text.len()
     );
 
-    let text_len = text.len();
-
-    let action_result = inspection::perform_selector_action(
+    with_narration(
         page,
         state,
-        selector,
-        "type",
-        &json!({
-            "text": text,
-            "slowly": slowly,
-            "clearFirst": clear_first,
-            "submit": submit,
-        }),
-        true,
-    )
-    .await?;
-    if !action_result
-        .get("ok")
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-    {
-        return Err(selector_action_error(
-            &action_result,
-            &format!("type failed for {selector}"),
-        ));
-    }
+        ActionKind::Type,
+        Some(selector),
+        Some(text),
+        || async {
+            let text_len = text.len();
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "typed": {
-            "selector": selector,
-            "text_length": text_len,
-            "slowly": slowly,
-            "submitted": submit,
-            "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
-            "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+            let action_result = inspection::perform_selector_action(
+                page,
+                state,
+                selector,
+                "type",
+                &json!({
+                    "text": text,
+                    "slowly": slowly,
+                    "clearFirst": clear_first,
+                    "submit": submit,
+                }),
+                true,
+            )
+            .await?;
+            if !action_result
+                .get("ok")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(false)
+            {
+                return Err(selector_action_error(
+                    &action_result,
+                    &format!("type failed for {selector}"),
+                ));
+            }
+
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "typed": {
+                    "selector": selector,
+                    "text_length": text_len,
+                    "slowly": slowly,
+                    "submitted": submit,
+                    "frameLabel": action_result.get("target").and_then(|value| value.get("frameLabel")).cloned().unwrap_or(Value::Null),
+                    "frameUrl": action_result.get("target").and_then(|value| value.get("frameUrl")).cloned().unwrap_or(Value::Null),
+                },
+                "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
+            }))
         },
-        "boundaries": action_result.get("boundaries").cloned().unwrap_or(json!([])),
-    }))
+    )
+    .await
 }
 
 // ── Press ──
