@@ -1,5 +1,5 @@
 <overview>
-Complete syntax reference for all 63 gsd-browser commands. Argument syntax: `<arg>` = required positional, `[arg]` = optional positional, `--flag` = named option. Do NOT add `--` prefix to positional args.
+Complete syntax reference for gsd-browser commands. Argument syntax: `<arg>` = required positional, `[arg]` = optional positional, `--flag` = named option. Do NOT add `--` prefix to positional args.
 </overview>
 
 <navigation>
@@ -172,6 +172,41 @@ gsd-browser select-frame --name main                      # Return to main frame
 ```
 
 </pages_and_frames>
+
+<live_viewer_and_narration>
+
+The live viewer is a localhost screen-sharing surface for the active browser session. Browser actions still run through CLI commands. The viewer displays live frames, narrated history, ref overlays, target rings, click ripples, failure markers, and page-following across navigation or tab changes.
+
+```bash
+gsd-browser view                                         # Open the live viewer
+gsd-browser view --print-only                            # Print URL only
+gsd-browser view --history                               # Open history-focused viewer
+gsd-browser view --history --print-only                  # Print history URL only
+
+gsd-browser goal "Find the checkout button"              # Set viewer goal banner
+gsd-browser goal --clear                                 # Clear goal banner
+
+gsd-browser pause                                        # Pause before next narrated action
+gsd-browser resume                                       # Resume actions
+gsd-browser step                                         # Allow one action, then pause
+gsd-browser abort                                        # Abort next gated action
+```
+
+Use `--session <name>` consistently so the viewer and commands attach to the same browser:
+
+```bash
+gsd-browser --session demo navigate https://example.com
+gsd-browser --session demo view --print-only
+gsd-browser --session demo click "h1"
+```
+
+Use `--no-narration-delay` for fast agent-only runs that keep narration events/history without lead-time sleeps:
+
+```bash
+gsd-browser --session demo --no-narration-delay click "h1"
+```
+
+</live_viewer_and_narration>
 
 <diagnostics>
 

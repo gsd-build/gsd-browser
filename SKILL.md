@@ -3,9 +3,11 @@ name: gsd-browser
 description: >
   Native Rust browser automation CLI for AI agents. Use when the user needs to
   interact with websites — navigating pages, filling forms, clicking buttons,
-  taking screenshots, extracting structured data, running assertions, testing
-  web apps, or automating any browser task. Triggers include requests to
-  "open a website", "fill out a form", "click a button", "take a screenshot",
+  taking screenshots, sharing a live browser view, narrating browser actions,
+  extracting structured data, running assertions, testing web apps, or
+  automating any browser task. Triggers include requests to "open a website",
+  "fill out a form", "click a button", "take a screenshot", "show me the
+  browser", "share the screen", "pause the browser", "step through this",
   "scrape data from a page", "test this web app", "login to a site",
   "automate browser actions", "visual regression test", "check for prompt
   injection", or any task requiring programmatic web interaction.
@@ -21,6 +23,7 @@ allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 3. **Use `--json` when parsing output.** Use text mode when reading output yourself. Use `--json` when you need to extract values programmatically (e.g., checking assertion results, parsing snapshot refs).
 4. **Positional args have no flag prefix.** Commands like `click`, `type`, `hover` take positional args — do NOT add `--selector`. See exact syntax in command reference below.
 5. **Use `batch` for atomic multi-step flows.** Batch reduces round trips and keeps pass/fail checks in one call. Use separate commands when you need intermediate output (e.g., snapshot to discover refs).
+6. **Use `view` when the user wants to watch or direct the browser.** The live viewer is the shared screen and control surface; keep running actions through CLI commands.
 
 ## Core Workflow
 
@@ -278,6 +281,51 @@ gsd-browser session-summary                        # Diagnostic summary of curre
 gsd-browser debug-bundle                           # Full debug bundle: screenshot + logs + timeline + a11y tree
 ```
 
+### Live Viewer & Narration
+
+The live viewer is a localhost screen-sharing surface for the active browser session. Browser actions still run through CLI commands. The viewer displays live frames, narrated action history, ref overlays, target rings, click ripples, failure markers, and page-following across navigation or tab changes.
+
+```bash
+gsd-browser view                                   # Open the live viewer
+gsd-browser view --print-only                      # Print URL only
+gsd-browser view --history                         # Open history-focused viewer
+gsd-browser view --history --print-only            # Print history URL only
+
+gsd-browser goal "Find the checkout button"        # Set viewer goal banner
+gsd-browser goal --clear                           # Clear goal banner
+
+gsd-browser pause                                  # Pause before next narrated action
+gsd-browser resume                                 # Resume actions
+gsd-browser step                                   # Allow one action, then pause
+gsd-browser abort                                  # Abort next gated action
+```
+
+Use one named session for the whole shared-screen flow:
+
+```bash
+gsd-browser --session demo navigate https://example.com
+gsd-browser --session demo view --print-only
+gsd-browser --session demo click "h1"
+```
+
+Viewer controls:
+
+| Control | Effect |
+|---------|--------|
+| Pause | Blocks before the next narrated action |
+| Resume | Allows actions to continue |
+| Step | Allows one action, then returns to paused mode |
+| Abort | Aborts the next gated action |
+| Refs overlay | Shows or hides target boxes/labels |
+
+Keyboard shortcuts: Space pauses/resumes, Right Arrow steps, Escape aborts, `R` toggles refs.
+
+Use `--no-narration-delay` for fast agent-only runs that keep narration events/history without lead-time sleeps:
+
+```bash
+gsd-browser --session demo --no-narration-delay click "h1"
+```
+
 ### Visual
 
 ```bash
@@ -424,6 +472,7 @@ Available on all commands:
 | `--browser-path <path>` | Path to Chrome/Chromium binary |
 | `--cdp-url <url>` | Attach to an already-running Chrome (e.g. `http://localhost:9222`) |
 | `--session <name>` | Named session for parallel browser instances |
+| `--no-narration-delay` | Skip narration lead-time sleeps while keeping history/events |
 
 ---
 
