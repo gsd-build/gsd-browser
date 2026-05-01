@@ -6,6 +6,7 @@ pub mod logs;
 pub mod narration;
 pub mod settle;
 pub mod state;
+pub mod view;
 
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::emulation::SetDeviceMetricsOverrideParams;
