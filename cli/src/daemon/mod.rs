@@ -45,6 +45,7 @@ pub async fn run(
     identity_scope: Option<String>,
     identity_key: Option<String>,
     identity_project_id: Option<String>,
+    no_narration_delay: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Initialize tracing — respect GSD_BROWSER_DEBUG for verbose output
     let filter = if std::env::var("GSD_BROWSER_DEBUG").is_ok() {
@@ -65,6 +66,7 @@ pub async fn run(
         identity_scope,
         identity_key,
         identity_project_id,
+        no_narration_delay,
     )
     .await
 }
@@ -151,6 +153,7 @@ async fn run_daemon(
     identity_scope_arg: Option<String>,
     identity_key_arg: Option<String>,
     identity_project_id_arg: Option<String>,
+    no_narration_delay: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Load config (layers 1-4: defaults → user → project → env vars)
     let config = Config::load();
@@ -387,18 +390,21 @@ async fn run_daemon(
         .config()
         .and_then(|cfg| cfg.user_data_dir.as_ref())
         .map(|path| path.display().to_string());
-    let daemon_state = Arc::new(DaemonState::new_with_session(SessionRuntime {
-        session_name: session.map(str::to_string),
-        launch_mode: launch_mode.clone(),
-        cdp_url: effective_cdp_url.clone(),
-        websocket_url: Some(browser.websocket_address().clone()),
-        browser_pid,
-        browser_user_data_dir,
-        identity_scope,
-        identity_project_id: identity_project_id_arg.clone(),
-        identity_key: identity_key_arg.clone(),
-        socket_path: sock_path.to_string_lossy().to_string(),
-    }));
+    let daemon_state = Arc::new(DaemonState::new_with_session_and_options(
+        SessionRuntime {
+            session_name: session.map(str::to_string),
+            launch_mode: launch_mode.clone(),
+            cdp_url: effective_cdp_url.clone(),
+            websocket_url: Some(browser.websocket_address().clone()),
+            browser_pid,
+            browser_user_data_dir,
+            identity_scope,
+            identity_project_id: identity_project_id_arg.clone(),
+            identity_key: identity_key_arg.clone(),
+            socket_path: sock_path.to_string_lossy().to_string(),
+        },
+        no_narration_delay,
+    ));
     logs::spawn_console_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_exception_listener(&page, daemon_logs.console.clone()).await;
     logs::spawn_network_listener(&page, daemon_logs.network.clone()).await;
