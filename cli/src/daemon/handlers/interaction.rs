@@ -821,7 +821,11 @@ pub async fn handle_set_viewport(page: &Page, params: &Value) -> Result<Value, S
 
 /// Handle `upload_file` command — set files on a file input element.
 /// Params: { selector: string, files: [string] }
-pub async fn handle_upload_file(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_upload_file(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
     let selector = params
         .get("selector")
         .and_then(|v| v.as_str())
@@ -841,30 +845,38 @@ pub async fn handle_upload_file(page: &Page, params: &Value) -> Result<Value, St
 
     debug!("upload_file: selector={selector} files={file_paths:?}");
 
-    // Find element to get its backend_node_id
-    let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
-        .await
-        .map_err(|_| format!("upload_file: timed out finding element: {selector}"))?
-        .map_err(|e| format!("element not found: {selector} ({e})"))?;
+    with_narration(
+        page,
+        state,
+        ActionKind::UploadFile,
+        Some(selector),
+        Some(selector),
+        || async {
+            let element = timeout(ELEMENT_TIMEOUT, page.find_element(selector))
+                .await
+                .map_err(|_| format!("upload_file: timed out finding element: {selector}"))?
+                .map_err(|e| format!("element not found: {selector} ({e})"))?;
 
-    // Use DOM.setFileInputFiles with backend_node_id
-    let set_files_params = SetFileInputFilesParams::builder()
-        .files(file_paths.iter().map(|s| s.as_str()))
-        .backend_node_id(element.backend_node_id)
-        .build()
-        .map_err(|e| format!("upload_file: failed to build params: {e}"))?;
+            let set_files_params = SetFileInputFilesParams::builder()
+                .files(file_paths.iter().map(|s| s.as_str()))
+                .backend_node_id(element.backend_node_id)
+                .build()
+                .map_err(|e| format!("upload_file: failed to build params: {e}"))?;
 
-    timeout(ELEMENT_TIMEOUT, page.execute(set_files_params))
-        .await
-        .map_err(|_| "upload_file: timed out setting files".to_string())?
-        .map_err(|e| format!("upload_file: CDP error: {e}"))?;
+            timeout(ELEMENT_TIMEOUT, page.execute(set_files_params))
+                .await
+                .map_err(|_| "upload_file: timed out setting files".to_string())?
+                .map_err(|e| format!("upload_file: CDP error: {e}"))?;
 
-    let (state, settle) = settle_and_capture(page).await;
-    Ok(json!({
-        "state": state,
-        "settle": settle,
-        "uploaded": { "selector": selector, "files": file_paths },
-    }))
+            let (state, settle) = settle_and_capture(page).await;
+            Ok(json!({
+                "state": state,
+                "settle": settle,
+                "uploaded": { "selector": selector, "files": file_paths },
+            }))
+        },
+    )
+    .await
 }
 
 #[cfg(test)]

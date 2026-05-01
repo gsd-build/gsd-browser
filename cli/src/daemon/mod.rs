@@ -843,7 +843,7 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "upload_file" => match handlers::interaction::handle_upload_file(page, &req.params).await {
+        "upload_file" => match handlers::interaction::handle_upload_file(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
