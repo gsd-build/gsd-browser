@@ -420,6 +420,12 @@ function hideRing() { ring.classList.remove('armed'); }
 
 let lastFrameDataUrl = null;
 function handleEvent(evt) {
+  if (evt.type === 'snapshot') {
+    setGoal(evt.goal);
+    applyControlState(evt.control || 'running');
+    for (const item of evt.history || []) handleEvent(item);
+    return;
+  }
   if (evt.viewport) applyViewport(evt.viewport);
   if (evt.type === 'frame') {
     lastFrameDataUrl = 'data:image/jpeg;base64,' + evt.data;
@@ -492,7 +498,7 @@ function pushHistory(intentEvt) {
   node.className = 'hist-item pending';
   node.innerHTML = `<span class="dot"></span><span class="label"></span><span class="time"></span>`;
   node.querySelector('.label').textContent = intentEvt.label;
-  node.querySelector('.time').textContent = fmtTime(intentEvt.timestamp);
+  node.querySelector('.time').textContent = fmtTime(intentEvt.timestamp_ms || intentEvt.timestamp || Date.now());
   const item = { node, frameBefore: lastFrameDataUrl, frameAfter: null, label: intentEvt.label };
   node.addEventListener('mouseenter', (e) => showHistPreview(item, e));
   node.addEventListener('mousemove', (e) => positionHistPreview(e));

@@ -1,5 +1,6 @@
 use chromiumoxide::cdp::browser_protocol::page::{
-    EventScreencastFrame, ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
+    CaptureScreenshotFormat, CaptureScreenshotParams, EventScreencastFrame,
+    ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
 };
 use chromiumoxide::Page;
 use std::sync::Arc;
@@ -21,6 +22,14 @@ pub struct ViewportInfo {
 }
 
 pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<FrameMessage>) {
+    let mut events = match page.event_listener::<EventScreencastFrame>().await {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("[view] failed to subscribe to screencast events: {e}");
+            None
+        }
+    };
+
     let params = StartScreencastParams::builder()
         .format(StartScreencastFormat::Jpeg)
         .quality(65)
@@ -34,29 +43,59 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
         return;
     }
 
-    let mut events = match page.event_listener::<EventScreencastFrame>().await {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!("[view] failed to subscribe to screencast events: {e}");
-            return;
-        }
-    };
+    let mut fallback = tokio::time::interval(std::time::Duration::from_millis(500));
 
-    while let Some(evt) = futures::StreamExt::next(&mut events).await {
-        let _ = page
-            .execute(ScreencastFrameAckParams::new(evt.session_id))
-            .await;
-        let data: String = evt.data.clone().into();
-        let msg = FrameMessage {
-            ty: "frame",
-            data,
-            viewport: ViewportInfo {
-                width: evt.metadata.device_width as u32,
-                height: evt.metadata.device_height as u32,
-            },
-            timestamp: crate::daemon::narration::events::now_ms(),
-        };
-        let _ = frames_tx.send(msg);
+    loop {
+        tokio::select! {
+            maybe_evt = async {
+                match events.as_mut() {
+                    Some(stream) => futures::StreamExt::next(stream).await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                let Some(evt) = maybe_evt else {
+                    events = None;
+                    continue;
+                };
+                let _ = page
+                    .execute(ScreencastFrameAckParams::new(evt.session_id))
+                    .await;
+                let data: String = evt.data.clone().into();
+                let _ = frames_tx.send(FrameMessage {
+                    ty: "frame",
+                    data,
+                    viewport: ViewportInfo {
+                        width: evt.metadata.device_width as u32,
+                        height: evt.metadata.device_height as u32,
+                    },
+                    timestamp: crate::daemon::narration::events::now_ms(),
+                });
+            }
+            _ = fallback.tick() => {
+                if frames_tx.receiver_count() == 0 {
+                    continue;
+                }
+                let params = CaptureScreenshotParams::builder()
+                    .format(CaptureScreenshotFormat::Jpeg)
+                    .quality(65)
+                    .from_surface(true)
+                    .optimize_for_speed(true)
+                    .build();
+                let Ok(resp) = page.execute(params).await else {
+                    continue;
+                };
+                let data: String = resp.result.data.clone().into();
+                let _ = frames_tx.send(FrameMessage {
+                    ty: "frame",
+                    data,
+                    viewport: ViewportInfo {
+                        width: 1920,
+                        height: 1080,
+                    },
+                    timestamp: crate::daemon::narration::events::now_ms(),
+                });
+            }
+        }
     }
 }
 
