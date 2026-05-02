@@ -80,6 +80,25 @@ pub struct CloudToolManifestMethod {
 
 pub const CLOUD_TOOL_MANIFEST_VERSION: u32 = 1;
 pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.20";
+pub const CLOUD_INPUT_COORDINATE_SPACE: &str = "viewport_css";
+pub const CLOUD_INPUT_KINDS: &[&str] = &[
+    "pointer",
+    "wheel",
+    "key",
+    "text",
+    "paste",
+    "composition",
+    "navigation",
+];
+pub const CLOUD_POINTER_PHASES: &[&str] = &[
+    "move",
+    "down",
+    "up",
+    "click",
+    "double_click",
+    "context_click",
+];
+pub const CLOUD_KEY_PHASES: &[&str] = &["down", "up", "press"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -213,9 +232,9 @@ impl<'de> Deserialize<'de> for CloudUserInput {
 impl CloudUserInput {
     pub fn validate(&self) -> Result<(), String> {
         if let Some(coordinate_space) = self.coordinate_space.as_deref() {
-            if coordinate_space != "viewport_css" {
+            if coordinate_space != CLOUD_INPUT_COORDINATE_SPACE {
                 return Err(format!(
-                    "coordinateSpace must be viewport_css, got {coordinate_space}"
+                    "coordinateSpace must be {CLOUD_INPUT_COORDINATE_SPACE}, got {coordinate_space}"
                 ));
             }
         }
@@ -225,7 +244,7 @@ impl CloudUserInput {
         match self.kind.as_str() {
             "pointer" => {
                 match self.phase.as_deref() {
-                    Some("move" | "down" | "up" | "click" | "double_click" | "context_click") => {}
+                    Some(phase) if CLOUD_POINTER_PHASES.contains(&phase) => {}
                     Some(other) => return Err(format!("invalid pointer phase: {other}")),
                     None => return Err("pointer input requires phase".to_string()),
                 }
@@ -236,7 +255,7 @@ impl CloudUserInput {
             "wheel" => {}
             "key" => {
                 match self.phase.as_deref() {
-                    Some("down" | "up" | "press") => {}
+                    Some(phase) if CLOUD_KEY_PHASES.contains(&phase) => {}
                     Some(other) => return Err(format!("invalid key phase: {other}")),
                     None => return Err("key input requires phase".to_string()),
                 }
