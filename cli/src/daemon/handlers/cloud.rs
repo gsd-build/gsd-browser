@@ -173,8 +173,7 @@ fn mouse_buttons_mask(button: &MouseButton) -> i64 {
 fn validate_coordinate_space(coordinate_space: Option<&str>) -> Result<(), String> {
     match coordinate_space {
         None | Some("") => Ok(()),
-        Some("viewport") | Some("viewport_css_pixels") | Some("viewport-css-px") => Ok(()),
-        Some("frame_css_pixels") => Ok(()),
+        Some("viewport_css") => Ok(()),
         Some(other) => Err(format!("unsupported coordinate space: {other}")),
     }
 }
@@ -361,6 +360,17 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
         }
     }
     let viewport = viewport_metrics(page, width, height).await;
+    let encoded_bytes = BASE64.decode(&data).map(|bytes| bytes.len()).unwrap_or(0);
+    let capture_scale_x = if viewport.width == 0 {
+        1.0
+    } else {
+        width as f64 / viewport.width as f64
+    };
+    let capture_scale_y = if viewport.height == 0 {
+        1.0
+    } else {
+        height as f64 / viewport.height as f64
+    };
     let frame = CloudFrame {
         sequence: FRAME_SEQUENCE.fetch_add(1, Ordering::Relaxed),
         content_type: "image/jpeg".to_string(),
@@ -369,8 +379,17 @@ pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, St
         height,
         viewport_width: viewport.width,
         viewport_height: viewport.height,
+        viewport_css_width: viewport.width,
+        viewport_css_height: viewport.height,
+        capture_pixel_width: width,
+        capture_pixel_height: height,
         device_pixel_ratio: viewport.device_pixel_ratio,
+        capture_scale_x,
+        capture_scale_y,
         captured_at_ms: now_ms(),
+        encoded_bytes,
+        quality,
+        capture_pixel_ratio: viewport.device_pixel_ratio,
         url: page_url(page).await,
         title: page_title(page).await,
     };
@@ -457,126 +476,127 @@ pub async fn handle_cloud_user_input(
     let modifiers = modifier_mask(input.modifiers.as_deref())?;
 
     match input.kind.as_str() {
-        "click" => {
-            let x = input.x.ok_or("click requires x")?;
-            let y = input.y.ok_or("click requires y")?;
-            let button = mouse_button(input.button.as_deref())?;
-            let buttons = mouse_buttons_mask(&button);
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MouseMoved,
-                x,
-                y,
-                MouseButton::None,
-                0,
-                0,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MousePressed,
-                x,
-                y,
-                button.clone(),
-                buttons,
-                1,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MouseReleased,
-                x,
-                y,
-                button,
-                0,
-                1,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            Ok(json!({ "clicked": { "x": x, "y": y } }))
+        "pointer" => {
+            let x = input.x.ok_or("pointer requires x")?;
+            let y = input.y.ok_or("pointer requires y")?;
+            let phase = input.phase.as_deref().ok_or("pointer requires phase")?;
+            let button = if phase == "context_click" {
+                MouseButton::Right
+            } else {
+                mouse_button(input.button.as_deref())?
+            };
+            let buttons = input.buttons.unwrap_or_else(|| mouse_buttons_mask(&button));
+            let click_count = match phase {
+                "double_click" => 2,
+                _ => input.click_count.unwrap_or(1),
+            };
+            match phase {
+                "move" => {
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MouseMoved,
+                        x,
+                        y,
+                        MouseButton::None,
+                        buttons,
+                        0,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                }
+                "down" => {
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MousePressed,
+                        x,
+                        y,
+                        button.clone(),
+                        buttons,
+                        click_count,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                }
+                "up" => {
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MouseReleased,
+                        x,
+                        y,
+                        button.clone(),
+                        0,
+                        click_count,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                }
+                "click" | "double_click" | "context_click" => {
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MouseMoved,
+                        x,
+                        y,
+                        MouseButton::None,
+                        0,
+                        0,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MousePressed,
+                        x,
+                        y,
+                        button.clone(),
+                        buttons,
+                        click_count,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                    dispatch_mouse(
+                        page,
+                        DispatchMouseEventType::MouseReleased,
+                        x,
+                        y,
+                        button,
+                        0,
+                        click_count,
+                        modifiers,
+                        None,
+                        None,
+                    )
+                    .await?;
+                }
+                other => return Err(format!("unsupported pointer phase: {other}")),
+            }
+            Ok(json!({ "pointer": { "phase": phase, "x": x, "y": y } }))
         }
-        "pointer_move" => {
-            let x = input.x.ok_or("pointer_move requires x")?;
-            let y = input.y.ok_or("pointer_move requires y")?;
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MouseMoved,
-                x,
-                y,
-                MouseButton::None,
-                0,
-                0,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            Ok(json!({ "pointer": { "kind": "pointer_move", "x": x, "y": y } }))
+        "key" => {
+            let key = input.key.ok_or("key requires key")?;
+            match input.phase.as_deref().unwrap_or("press") {
+                "down" => {
+                    dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?
+                }
+                "up" => dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?,
+                "press" => {
+                    dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?;
+                    dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?;
+                }
+                other => return Err(format!("unsupported key phase: {other}")),
+            }
+            Ok(json!({ "key": { "phase": input.phase.as_deref().unwrap_or("press"), "key": key } }))
         }
-        "pointer_down" => {
-            let x = input.x.ok_or("pointer_down requires x")?;
-            let y = input.y.ok_or("pointer_down requires y")?;
-            let button = mouse_button(input.button.as_deref())?;
-            let buttons = mouse_buttons_mask(&button);
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MousePressed,
-                x,
-                y,
-                button,
-                buttons,
-                1,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            Ok(json!({ "pointer": { "kind": "pointer_down", "x": x, "y": y } }))
-        }
-        "pointer_up" => {
-            let x = input.x.ok_or("pointer_up requires x")?;
-            let y = input.y.ok_or("pointer_up requires y")?;
-            let button = mouse_button(input.button.as_deref())?;
-            dispatch_mouse(
-                page,
-                DispatchMouseEventType::MouseReleased,
-                x,
-                y,
-                button,
-                0,
-                1,
-                modifiers,
-                None,
-                None,
-            )
-            .await?;
-            Ok(json!({ "pointer": { "kind": "pointer_up", "x": x, "y": y } }))
-        }
-        "key_down" => {
-            let key = input.key.ok_or("key_down requires key")?;
-            dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?;
-            Ok(json!({ "key": { "kind": "key_down", "key": key } }))
-        }
-        "key_up" => {
-            let key = input.key.ok_or("key_up requires key")?;
-            dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?;
-            Ok(json!({ "key": { "kind": "key_up", "key": key } }))
-        }
-        "press" => {
-            let key = input.key.ok_or("press requires key")?;
-            dispatch_key(page, &key, DispatchKeyEventType::KeyDown, modifiers).await?;
-            dispatch_key(page, &key, DispatchKeyEventType::KeyUp, modifiers).await?;
-            Ok(json!({ "pressed": key }))
-        }
-        "text" | "type" => {
+        "text" | "paste" | "composition" => {
             let text = input
                 .text
                 .ok_or_else(|| format!("{} requires text", input.kind))?;
@@ -617,6 +637,10 @@ pub async fn handle_cloud_user_input(
                 },
                 "scroll": scroll_info(page).await,
             }))
+        }
+        "navigation" => {
+            let url = input.url.ok_or("navigation requires url")?;
+            handlers::navigate::handle_navigate(page, &json!({ "url": url }), _state).await
         }
         _ => Err(format!("unsupported user input kind: {}", input.kind)),
     }

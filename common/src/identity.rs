@@ -57,6 +57,62 @@ pub fn identity_profile_dir(
     }
 }
 
+pub fn validate_identity_context(
+    scope: IdentityScope,
+    project_id: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<(), String> {
+    match scope {
+        IdentityScope::Session => {
+            if session_id.is_none() {
+                return Err("session identity requires session id".to_string());
+            }
+            if project_id.is_some() {
+                return Err("session identity does not accept project id".to_string());
+            }
+        }
+        IdentityScope::Project => {
+            if project_id.is_none() {
+                return Err("project identity requires project id".to_string());
+            }
+            if session_id.is_some() {
+                return Err("project identity does not accept session id".to_string());
+            }
+        }
+        IdentityScope::Global => {
+            if project_id.is_some() {
+                return Err("global identity does not accept project id".to_string());
+            }
+            if session_id.is_some() {
+                return Err("global identity does not accept session id".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn identity_context_profile_dir(
+    scope: IdentityScope,
+    project_id: Option<&str>,
+    session_id: Option<&str>,
+    key: &str,
+) -> Result<PathBuf, String> {
+    validate_identity_context(scope, project_id, session_id)?;
+    let safe_key = sanitize_filename(key)?;
+    let root = state_dir().join("identities").join(scope.as_dir());
+    match scope {
+        IdentityScope::Session => {
+            let session = sanitize_filename(session_id.expect("validated session id"))?;
+            Ok(root.join(session).join(safe_key).join("browser-profile"))
+        }
+        IdentityScope::Project => {
+            let project = sanitize_filename(project_id.expect("validated project id"))?;
+            Ok(root.join(project).join(safe_key).join("browser-profile"))
+        }
+        IdentityScope::Global => Ok(root.join(safe_key).join("browser-profile")),
+    }
+}
+
 pub fn identity_metadata_path(
     scope: IdentityScope,
     project_id: Option<&str>,
