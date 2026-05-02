@@ -1,7 +1,8 @@
+use base64::{engine::general_purpose, Engine as _};
 use gsd_browser_common::viewer::{BrowserArtifactManifestV1, BROWSER_ARTIFACT_BUNDLE_SCHEMA};
 use regex_lite::Regex;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[serde(rename_all = "camelCase")]
 pub struct RecordingSession {
     pub recording_id: String,
+    pub session_id: String,
     pub name: String,
     pub started_at_ms: u64,
     pub paused: bool,
@@ -31,6 +33,8 @@ pub struct RecordingStore {
     completed: Vec<BrowserArtifactManifestV1>,
     next_seq: u64,
     redaction_hits: u64,
+    frame_count: u64,
+    hashes: Map<String, Value>,
 }
 
 fn now_ms() -> u64 {
@@ -48,13 +52,19 @@ impl RecordingStore {
             completed: Vec::new(),
             next_seq: 1,
             redaction_hits: 0,
+            frame_count: 0,
+            hashes: Map::new(),
         }
     }
 
-    pub fn start(&mut self, name: &str) -> Result<RecordingSession, String> {
+    pub fn start(&mut self, name: &str, session_id: &str) -> Result<RecordingSession, String> {
         if self.active.is_some() {
             return Err("recording already active".to_string());
         }
+        self.next_seq = 1;
+        self.redaction_hits = 0;
+        self.frame_count = 0;
+        self.hashes.clear();
         fs::create_dir_all(&self.root)
             .map_err(|err| format!("failed to create recordings root: {err}"))?;
         let recording_id = format!("rec_{}", uuid::Uuid::new_v4());
@@ -75,6 +85,7 @@ impl RecordingStore {
             .map_err(|err| format!("failed to create deltas.json: {err}"))?;
         let session = RecordingSession {
             recording_id,
+            session_id: session_id.to_string(),
             name: name.to_string(),
             started_at_ms: now_ms(),
             paused: false,
@@ -119,6 +130,7 @@ impl RecordingStore {
             "timestampMs": now_ms(),
             "schema": "BrowserEventV1",
             "recordingId": active.recording_id,
+            "sessionId": active.session_id,
             "source": input.source,
             "owner": input.owner,
             "controlVersion": 0,
@@ -143,6 +155,28 @@ impl RecordingStore {
         Ok(())
     }
 
+    pub fn record_frame(
+        &mut self,
+        frame: &crate::daemon::view::capture::FrameMessage,
+    ) -> Result<(), String> {
+        let Some(active) = self.active.as_ref() else {
+            return Ok(());
+        };
+        if active.paused {
+            return Ok(());
+        }
+        let rel = format!("frames/frame-{:06}.jpg", frame.frame_seq);
+        let path = self.root.join(&active.recording_id).join(&rel);
+        let bytes = general_purpose::STANDARD
+            .decode(&frame.data_base64)
+            .map_err(|err| format!("failed to decode frame: {err}"))?;
+        fs::write(&path, &bytes).map_err(|err| format!("failed to write frame: {err}"))?;
+        let hash = sha256_hex(&bytes);
+        self.hashes.insert(rel, Value::String(hash));
+        self.frame_count += 1;
+        Ok(())
+    }
+
     pub fn stop(&mut self, recording_id: &str) -> Result<BrowserArtifactManifestV1, String> {
         let active = self.active.take().ok_or("no active recording")?;
         if active.recording_id != recording_id {
@@ -154,14 +188,14 @@ impl RecordingStore {
         let manifest = BrowserArtifactManifestV1 {
             schema: BROWSER_ARTIFACT_BUNDLE_SCHEMA.to_string(),
             recording_id: active.recording_id.clone(),
-            session_id: "default".to_string(),
+            session_id: active.session_id,
             name: active.name,
             started_at_ms: active.started_at_ms,
             stopped_at_ms: Some(now_ms()),
             start_seq: 1,
             stop_seq: Some(event_count),
             event_count,
-            frame_count: 0,
+            frame_count: self.frame_count,
             annotation_count: 0,
             console_error_count: 0,
             failed_request_count: 0,
@@ -181,7 +215,7 @@ impl RecordingStore {
                 "dialog": "logs/dialog.jsonl",
                 "deltas": "deltas.json"
             }),
-            hashes: json!({}),
+            hashes: Value::Object(self.hashes.clone()),
         };
         let dir = self.root.join(&manifest.recording_id);
         let data = serde_json::to_string_pretty(&manifest).map_err(|err| err.to_string())?;
@@ -318,6 +352,13 @@ fn origin_from_url(url: &str) -> String {
     format!("{scheme}://{host}")
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,7 +368,9 @@ mod tests {
     fn recording_writes_manifest_and_events() {
         let dir = tempdir().expect("tempdir");
         let mut store = RecordingStore::new(dir.path().to_path_buf());
-        let rec = store.start("checkout-bug").expect("started");
+        let rec = store
+            .start("checkout-bug", "uat-workbench")
+            .expect("started");
         store
             .record_event(RecordingEventInput {
                 source: "viewer".to_string(),
@@ -338,12 +381,48 @@ mod tests {
                 redacted: false,
             })
             .expect("event");
+        store
+            .record_frame(&crate::daemon::view::capture::FrameMessage {
+                ty: "frame",
+                frame_seq: 12,
+                content_type: "image/jpeg",
+                data_base64: general_purpose::STANDARD.encode([1_u8, 2, 3, 4]),
+                data: general_purpose::STANDARD.encode([1_u8, 2, 3, 4]),
+                viewport: crate::daemon::view::capture::ViewportInfo {
+                    width: 800,
+                    height: 600,
+                    device_pixel_ratio: 1.0,
+                    scroll_x: 0.0,
+                    scroll_y: 0.0,
+                },
+                capture_pixel_width: 800,
+                capture_pixel_height: 600,
+                device_pixel_ratio: 1.0,
+                capture_scale_x: 1.0,
+                capture_scale_y: 1.0,
+                url: "http://127.0.0.1".to_string(),
+                title: "Fixture".to_string(),
+                timestamp: now_ms(),
+            })
+            .expect("frame");
         let manifest = store.stop(&rec.recording_id).expect("stopped");
+        assert_eq!(manifest.session_id, "uat-workbench");
         assert_eq!(manifest.event_count, 1);
+        assert_eq!(manifest.frame_count, 1);
+        assert!(manifest
+            .hashes
+            .get("frames/frame-000012.jpg")
+            .and_then(serde_json::Value::as_str)
+            .is_some());
         assert!(dir
             .path()
             .join(&rec.recording_id)
             .join("manifest.json")
+            .exists());
+        assert!(dir
+            .path()
+            .join(&rec.recording_id)
+            .join("frames/frame-000012.jpg")
             .exists());
         assert!(dir
             .path()

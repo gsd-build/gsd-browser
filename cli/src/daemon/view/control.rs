@@ -86,6 +86,13 @@ impl SharedControlStore {
         self.state.control_version += 1;
     }
 
+    pub fn update_frame_seq(&mut self, frame_seq: u64) -> SharedControlStateV1 {
+        if frame_seq > self.state.frame_seq {
+            self.state.frame_seq = frame_seq;
+        }
+        self.snapshot()
+    }
+
     pub fn authorize(
         &mut self,
         req: AuthorizationRequest,
@@ -287,7 +294,8 @@ impl SharedControlStore {
         &mut self,
         reason: impl Into<String>,
     ) -> Result<SharedControlStateV1, String> {
-        self.state.mode = ControlMode::UserTakeover;
+        self.state.owner = ControlOwner::Agent;
+        self.state.mode = ControlMode::AgentRunning;
         self.state.sensitive = false;
         self.state.reason = reason.into();
         self.bump();
@@ -459,6 +467,29 @@ mod tests {
             })
             .expect_err("paused blocks agent");
         assert_eq!(err.reason, ControlRejectReason::AgentNotAllowedWhilePaused);
+    }
+
+    #[test]
+    fn frame_sequence_advances_without_control_version_churn() {
+        let mut store = SharedControlStore::new_for_tests(7, 3);
+        let state = store.update_frame_seq(9);
+        assert_eq!(state.frame_seq, 9);
+        assert_eq!(state.control_version, 7);
+
+        let state = store.update_frame_seq(4);
+        assert_eq!(state.frame_seq, 9);
+        assert_eq!(state.control_version, 7);
+    }
+
+    #[test]
+    fn sensitive_off_returns_control_to_agent() {
+        let mut store = SharedControlStore::new_for_tests(1, 1);
+        store.sensitive_on("private").expect("sensitive on");
+        let state = store.sensitive_off("clear").expect("sensitive off");
+
+        assert_eq!(state.owner, ControlOwner::Agent);
+        assert_eq!(state.mode, ControlMode::AgentRunning);
+        assert!(!state.sensitive);
     }
 
     #[test]

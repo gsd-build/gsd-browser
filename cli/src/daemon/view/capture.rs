@@ -12,7 +12,7 @@ static FRAME_SEQ: AtomicU64 = AtomicU64::new(1);
 #[derive(Clone, serde::Serialize)]
 pub struct FrameMessage {
     #[serde(rename = "type")]
-    ty: &'static str,
+    pub(crate) ty: &'static str,
     #[serde(rename = "frameSeq")]
     pub frame_seq: u64,
     pub content_type: &'static str,
@@ -131,7 +131,11 @@ async fn frame_message(
     }
 }
 
-pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<FrameMessage>) {
+pub async fn run_capture_loop(
+    page: Arc<Page>,
+    frames_tx: broadcast::Sender<FrameMessage>,
+    daemon_state: Option<Arc<crate::daemon::state::DaemonState>>,
+) {
     let mut events = match page.event_listener::<EventScreencastFrame>().await {
         Ok(s) => Some(s),
         Err(e) => {
@@ -177,6 +181,7 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
                     evt.metadata.device_width as u32,
                     evt.metadata.device_height as u32,
                 ).await;
+                record_frame_metadata(&daemon_state, &msg).await;
                 let _ = frames_tx.send(msg);
             }
             _ = fallback.tick() => {
@@ -194,19 +199,39 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
                 };
                 let data: String = resp.result.data.clone().into();
                 let msg = frame_message(&page, data, 1920, 1080).await;
+                record_frame_metadata(&daemon_state, &msg).await;
                 let _ = frames_tx.send(msg);
             }
         }
     }
 }
 
+async fn record_frame_metadata(
+    daemon_state: &Option<Arc<crate::daemon::state::DaemonState>>,
+    frame: &FrameMessage,
+) {
+    let Some(state) = daemon_state else {
+        return;
+    };
+    {
+        let mut control = state.view_control.lock().await;
+        control.update_frame_seq(frame.frame_seq);
+    }
+    let mut recordings = state.recordings.lock().await;
+    if let Err(err) = recordings.record_frame(frame) {
+        tracing::warn!("[view] failed to record frame: {err}");
+    }
+}
+
 pub async fn run_capture_manager(
     mut page_rx: watch::Receiver<Arc<Page>>,
     frames_tx: broadcast::Sender<FrameMessage>,
+    daemon_state: Option<Arc<crate::daemon::state::DaemonState>>,
 ) {
     let mut task = tokio::spawn(run_capture_loop(
         page_rx.borrow().clone(),
         frames_tx.clone(),
+        daemon_state.clone(),
     ));
 
     loop {
@@ -217,7 +242,11 @@ pub async fn run_capture_manager(
                     break;
                 }
                 task.abort();
-                task = tokio::spawn(run_capture_loop(page_rx.borrow().clone(), frames_tx.clone()));
+                task = tokio::spawn(run_capture_loop(
+                    page_rx.borrow().clone(),
+                    frames_tx.clone(),
+                    daemon_state.clone(),
+                ));
             }
             result = &mut task => {
                 if let Err(err) = result {
@@ -225,7 +254,11 @@ pub async fn run_capture_manager(
                         tracing::warn!("[view] capture task ended: {err}");
                     }
                 }
-                task = tokio::spawn(run_capture_loop(page_rx.borrow().clone(), frames_tx.clone()));
+                task = tokio::spawn(run_capture_loop(
+                    page_rx.borrow().clone(),
+                    frames_tx.clone(),
+                    daemon_state.clone(),
+                ));
             }
         }
     }

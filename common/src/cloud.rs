@@ -79,7 +79,7 @@ pub struct CloudToolManifestMethod {
 }
 
 pub const CLOUD_TOOL_MANIFEST_VERSION: u32 = 1;
-pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.23";
+pub const CLOUD_TOOL_RUNTIME_MIN_VERSION: &str = "0.1.24";
 pub const CLOUD_INPUT_COORDINATE_SPACE: &str = "viewport_css";
 pub const CLOUD_INPUT_KINDS: &[&str] = &[
     "pointer",
