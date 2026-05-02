@@ -3,6 +3,8 @@ pub mod capture;
 pub mod control;
 pub mod http;
 pub mod input;
+pub mod page_state;
+pub mod privacy;
 pub mod refs_poller;
 pub mod target_follow;
 pub mod viewer_html;

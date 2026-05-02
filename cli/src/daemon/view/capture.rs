@@ -3,15 +3,30 @@ use chromiumoxide::cdp::browser_protocol::page::{
     ScreencastFrameAckParams, StartScreencastFormat, StartScreencastParams,
 };
 use chromiumoxide::Page;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{broadcast, watch};
+
+static FRAME_SEQ: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, serde::Serialize)]
 pub struct FrameMessage {
     #[serde(rename = "type")]
     ty: &'static str,
+    #[serde(rename = "frameSeq")]
+    pub frame_seq: u64,
+    pub content_type: &'static str,
+    #[serde(rename = "dataBase64")]
+    pub data_base64: String,
     pub data: String,
     pub viewport: ViewportInfo,
+    pub capture_pixel_width: u32,
+    pub capture_pixel_height: u32,
+    pub device_pixel_ratio: f64,
+    pub capture_scale_x: f64,
+    pub capture_scale_y: f64,
+    pub url: String,
+    pub title: String,
     pub timestamp: u64,
 }
 
@@ -19,6 +34,101 @@ pub struct FrameMessage {
 pub struct ViewportInfo {
     pub width: u32,
     pub height: u32,
+    #[serde(rename = "devicePixelRatio")]
+    pub device_pixel_ratio: f64,
+    #[serde(rename = "scrollX")]
+    pub scroll_x: f64,
+    #[serde(rename = "scrollY")]
+    pub scroll_y: f64,
+}
+
+async fn viewport_info(page: &Page, fallback_width: u32, fallback_height: u32) -> ViewportInfo {
+    let value = page
+        .evaluate_expression(
+            r#"(() => ({
+                width: Math.max(0, Math.round(window.innerWidth || 0)),
+                height: Math.max(0, Math.round(window.innerHeight || 0)),
+                devicePixelRatio: Number(window.devicePixelRatio || 1),
+                scrollX: Number(window.scrollX || 0),
+                scrollY: Number(window.scrollY || 0)
+            }))()"#,
+        )
+        .await
+        .ok()
+        .and_then(|result| result.into_value().ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let width = value
+        .get("width")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(fallback_width as u64) as u32;
+    let height = value
+        .get("height")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(fallback_height as u64) as u32;
+
+    ViewportInfo {
+        width: if width == 0 { fallback_width } else { width },
+        height: if height == 0 { fallback_height } else { height },
+        device_pixel_ratio: value
+            .get("devicePixelRatio")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or(1.0),
+        scroll_x: value
+            .get("scrollX")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_default(),
+        scroll_y: value
+            .get("scrollY")
+            .and_then(serde_json::Value::as_f64)
+            .unwrap_or_default(),
+    }
+}
+
+async fn page_url(page: &Page) -> String {
+    page.url().await.unwrap_or_default().unwrap_or_default()
+}
+
+async fn page_title(page: &Page) -> String {
+    page.get_title()
+        .await
+        .unwrap_or_default()
+        .unwrap_or_default()
+}
+
+async fn frame_message(
+    page: &Page,
+    data: String,
+    pixel_width: u32,
+    pixel_height: u32,
+) -> FrameMessage {
+    let viewport = viewport_info(page, pixel_width, pixel_height).await;
+    let capture_scale_x = if viewport.width == 0 {
+        1.0
+    } else {
+        pixel_width as f64 / viewport.width as f64
+    };
+    let capture_scale_y = if viewport.height == 0 {
+        1.0
+    } else {
+        pixel_height as f64 / viewport.height as f64
+    };
+    FrameMessage {
+        ty: "frame",
+        frame_seq: FRAME_SEQ.fetch_add(1, Ordering::Relaxed),
+        content_type: "image/jpeg",
+        data_base64: data.clone(),
+        data,
+        capture_pixel_width: pixel_width,
+        capture_pixel_height: pixel_height,
+        device_pixel_ratio: viewport.device_pixel_ratio,
+        capture_scale_x,
+        capture_scale_y,
+        url: page_url(page).await,
+        title: page_title(page).await,
+        viewport,
+        timestamp: crate::daemon::narration::events::now_ms(),
+    }
 }
 
 pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<FrameMessage>) {
@@ -61,15 +171,13 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
                     .execute(ScreencastFrameAckParams::new(evt.session_id))
                     .await;
                 let data: String = evt.data.clone().into();
-                let _ = frames_tx.send(FrameMessage {
-                    ty: "frame",
+                let msg = frame_message(
+                    &page,
                     data,
-                    viewport: ViewportInfo {
-                        width: evt.metadata.device_width as u32,
-                        height: evt.metadata.device_height as u32,
-                    },
-                    timestamp: crate::daemon::narration::events::now_ms(),
-                });
+                    evt.metadata.device_width as u32,
+                    evt.metadata.device_height as u32,
+                ).await;
+                let _ = frames_tx.send(msg);
             }
             _ = fallback.tick() => {
                 if frames_tx.receiver_count() == 0 {
@@ -85,15 +193,8 @@ pub async fn run_capture_loop(page: Arc<Page>, frames_tx: broadcast::Sender<Fram
                     continue;
                 };
                 let data: String = resp.result.data.clone().into();
-                let _ = frames_tx.send(FrameMessage {
-                    ty: "frame",
-                    data,
-                    viewport: ViewportInfo {
-                        width: 1920,
-                        height: 1080,
-                    },
-                    timestamp: crate::daemon::narration::events::now_ms(),
-                });
+                let msg = frame_message(&page, data, 1920, 1080).await;
+                let _ = frames_tx.send(msg);
             }
         }
     }

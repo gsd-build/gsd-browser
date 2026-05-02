@@ -747,10 +747,12 @@ pub(crate) async fn dispatch_inner(
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }
         }
-        "cloud_frame" => match handlers::cloud::handle_cloud_frame(page, &req.params).await {
-            Ok(result) => DaemonResponse::success(req.id, result),
-            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
-        },
+        "cloud_frame" => {
+            match handlers::cloud::handle_cloud_frame(page, state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "cloud_refs" => match handlers::cloud::handle_cloud_refs(page, state, &req.params).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),

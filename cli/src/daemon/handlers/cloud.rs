@@ -114,7 +114,24 @@ pub async fn handle_cloud_session_status(
     serde_json::to_value(status).map_err(|err| err.to_string())
 }
 
-pub async fn handle_cloud_frame(page: &Page, params: &Value) -> Result<Value, String> {
+pub async fn handle_cloud_frame(
+    page: &Page,
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let control = state.view_control.lock().await.snapshot();
+    let policy = crate::daemon::view::privacy::policy_from_control(&control);
+    if policy.capture_decision(crate::daemon::view::privacy::CaptureConsumer::CloudFrame)
+        == crate::daemon::view::privacy::CaptureDecision::RedactedFrameCard
+    {
+        return Ok(json!({
+            "sequence": 0,
+            "contentType": "application/vnd.gsd.redacted-frame+json",
+            "dataBase64": "",
+            "redacted": true,
+            "reason": "sensitive_privacy_mode"
+        }));
+    }
     let quality = params.get("quality").and_then(Value::as_u64).unwrap_or(70) as u32;
     let shot = handlers::screenshot::handle_screenshot(
         page,
