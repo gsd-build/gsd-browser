@@ -442,6 +442,25 @@ enum Commands {
         #[arg(long)]
         interactive: bool,
     },
+    /// List viewer annotations
+    Annotations,
+    /// Get one viewer annotation
+    AnnotationGet { id: String },
+    /// Clear one annotation or all annotations
+    AnnotationClear {
+        id: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Mark an annotation resolved
+    AnnotationResolve { id: String },
+    /// Export annotations as JSON
+    AnnotationExport {
+        #[arg(long)]
+        output: String,
+    },
+    /// Ask the viewer user for an annotation
+    AnnotationRequest { note: String },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
     /// Capture a debug bundle (screenshot, logs, timeline, accessibility tree)
@@ -910,6 +929,37 @@ async fn main() {
             history,
             interactive: _,
         } => cmd_view(&cli, *print_only, *history).await,
+        Commands::Annotations => cmd_control(&cli, "annotations").await,
+        Commands::AnnotationGet { id } => {
+            cmd_json_method(&cli, "annotation_get", serde_json::json!({ "id": id })).await
+        }
+        Commands::AnnotationClear { id, all } => {
+            cmd_json_method(
+                &cli,
+                "annotation_clear",
+                serde_json::json!({ "id": id, "all": all }),
+            )
+            .await
+        }
+        Commands::AnnotationResolve { id } => {
+            cmd_json_method(&cli, "annotation_resolve", serde_json::json!({ "id": id })).await
+        }
+        Commands::AnnotationExport { output } => {
+            cmd_json_method(
+                &cli,
+                "annotation_export",
+                serde_json::json!({ "output": output }),
+            )
+            .await
+        }
+        Commands::AnnotationRequest { note } => {
+            cmd_json_method(
+                &cli,
+                "annotation_request",
+                serde_json::json!({ "note": note }),
+            )
+            .await
+        }
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
         Commands::VisualDiff {
@@ -1892,6 +1942,18 @@ async fn cmd_control(cli: &Cli, method: &str) -> CmdResult {
     )
     .await?;
     handle_response(cli, resp, format_text_control)
+}
+
+async fn cmd_json_method(cli: &Cli, method: &str, params: serde_json::Value) -> CmdResult {
+    let resp = daemon_client::send_request(
+        method,
+        params,
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_json)
 }
 
 async fn cmd_view(cli: &Cli, print_only: bool, history: bool) -> CmdResult {

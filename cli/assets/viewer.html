@@ -753,6 +753,43 @@ function forwardPointer(event, phase) {
 }
 
 wrap.addEventListener("click", (event) => forwardPointer(event, "click"));
+wrap.addEventListener("click", (event) => {
+  if (viewerState.mode !== "annotate" || !viewerState.latestFrame) return;
+  event.preventDefault();
+  const point = mapViewerPoint(event, viewerState.latestFrame, wrap);
+  const annotationId = `ann_${Date.now()}_${viewerState.commandSeq}`;
+  sendViewerCommand("annotation", {
+    schema: "AnnotationCommandV1",
+    action: "create",
+    annotation: {
+      schema: "AnnotationV1",
+      annotationId,
+      sessionId: viewerState.sessionId,
+      viewerId: viewerState.viewerId,
+      pageId: null,
+      targetId: null,
+      frameId: "main",
+      frameSeq: viewerState.frameSeq,
+      kind: "point",
+      status: "open",
+      note: "Viewer annotation",
+      url: viewerState.latestFrame.url || "",
+      title: viewerState.latestFrame.title || "",
+      origin: location.origin,
+      createdBy: "user",
+      createdAtMs: Date.now(),
+      viewport: viewerState.latestFrame.viewport || {},
+      selection: {
+        coordinateSpace: "viewport_css",
+        box: { x: point.x, y: point.y, w: 1, h: 1 }
+      },
+      target: null,
+      artifactRefs: {},
+      partialReasons: viewerState.sensitive ? ["sensitive_redacted"] : [],
+      redactions: viewerState.sensitive ? ["sensitive_redacted"] : []
+    }
+  });
+}, { capture: true });
 wrap.addEventListener("contextmenu", (event) => forwardPointer(event, "context_click"));
 wrap.addEventListener("wheel", (event) => {
   if (viewerState.mode !== "control" || !viewerState.latestFrame) return;

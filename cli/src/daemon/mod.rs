@@ -834,6 +834,40 @@ pub(crate) async fn dispatch_inner(
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
         },
+        "annotations" => match handlers::narration_cmds::handle_annotations(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "annotation_get" => {
+            match handlers::narration_cmds::handle_annotation_get(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "annotation_clear" => {
+            match handlers::narration_cmds::handle_annotation_clear(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "annotation_resolve" => {
+            match handlers::narration_cmds::handle_annotation_resolve(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "annotation_export" => {
+            match handlers::narration_cmds::handle_annotation_export(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "annotation_request" => {
+            match handlers::narration_cmds::handle_annotation_request(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
         "navigate" => match handlers::navigate::handle_navigate(page, &req.params, state).await {
             Ok(result) => DaemonResponse::success(req.id, result),
             Err(msg) => DaemonResponse::error_with_data(

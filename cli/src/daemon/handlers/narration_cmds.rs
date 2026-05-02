@@ -125,3 +125,77 @@ pub async fn handle_view(
     *guard = Some(handle);
     Ok(json!({"url": url, "port": port, "started": true}))
 }
+
+pub async fn handle_annotations(state: &DaemonState) -> Result<Value, String> {
+    let annotations = state.annotations.lock().await.list();
+    Ok(json!({ "annotations": annotations }))
+}
+
+pub async fn handle_annotation_get(state: &DaemonState, params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("annotation_get requires id")?;
+    let annotation = state
+        .annotations
+        .lock()
+        .await
+        .get(id)
+        .ok_or_else(|| format!("annotation not found: {id}"))?;
+    serde_json::to_value(annotation).map_err(|err| err.to_string())
+}
+
+pub async fn handle_annotation_clear(state: &DaemonState, params: &Value) -> Result<Value, String> {
+    let all = params.get("all").and_then(Value::as_bool).unwrap_or(false);
+    let mut store = state.annotations.lock().await;
+    if all {
+        store.clear_all();
+        return Ok(json!({ "cleared": "all" }));
+    }
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("annotation_clear requires id or all")?;
+    Ok(json!({ "cleared": store.clear(id), "id": id }))
+}
+
+pub async fn handle_annotation_resolve(
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("annotation_resolve requires id")?;
+    let annotation = state
+        .annotations
+        .lock()
+        .await
+        .set_status(id, gsd_browser_common::viewer::AnnotationStatus::Resolved)?;
+    serde_json::to_value(annotation).map_err(|err| err.to_string())
+}
+
+pub async fn handle_annotation_export(
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let output = params
+        .get("output")
+        .and_then(Value::as_str)
+        .ok_or("annotation_export requires output")?;
+    let annotations = state.annotations.lock().await.list();
+    let json = serde_json::to_string_pretty(&annotations).map_err(|err| err.to_string())?;
+    std::fs::write(output, json).map_err(|err| format!("failed to write annotations: {err}"))?;
+    Ok(json!({ "output": output, "count": annotations.len() }))
+}
+
+pub async fn handle_annotation_request(
+    _state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let note = params
+        .get("note")
+        .and_then(Value::as_str)
+        .ok_or("annotation_request requires note")?;
+    Ok(json!({ "pending": true, "note": note }))
+}

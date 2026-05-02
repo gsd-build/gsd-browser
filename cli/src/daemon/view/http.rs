@@ -184,12 +184,56 @@ async fn post_input(
     Ok(Json(value))
 }
 
+async fn get_annotations(
+    State(s): State<ViewState>,
+    uri: Uri,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    verify_viewer_token(&s, &uri, "annotation")?;
+    let annotations = s.daemon_state.annotations.lock().await.list();
+    Ok(Json(serde_json::json!({ "annotations": annotations })))
+}
+
+async fn post_annotation(
+    State(s): State<ViewState>,
+    uri: Uri,
+    headers: HeaderMap,
+    Json(value): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    verify_viewer_token(&s, &uri, "annotation")?;
+    verify_origin(&s, &headers)?;
+    let cmd = crate::daemon::view::input::parse_viewer_command(value).map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!(
+                "viewer annotation rejected: {:?}: {}",
+                err.reason, err.message
+            ),
+        )
+    })?;
+    let value = match crate::daemon::view::input::handle_viewer_command(cmd, &s).await {
+        Ok(accepted) => serde_json::to_value(accepted).map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to serialize accepted annotation: {err}"),
+            )
+        })?,
+        Err(rejected) => serde_json::to_value(rejected).map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to serialize rejected annotation: {err}"),
+            )
+        })?,
+    };
+    Ok(Json(value))
+}
+
 pub fn router(state: ViewState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/health", get(health))
         .route("/control", get(get_control).post(post_control))
         .route("/input", post(post_input))
+        .route("/annotation", get(get_annotations).post(post_annotation))
         .route("/ws", get(crate::daemon::view::ws::ws_upgrade))
         .with_state(state)
 }

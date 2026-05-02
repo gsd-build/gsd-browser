@@ -209,7 +209,32 @@ pub async fn handle_viewer_command(
                 control.frame_seq,
             ))
         }
-        ViewerCommandPayload::Annotation(_) | ViewerCommandPayload::Recording(_) => {
+        ViewerCommandPayload::Annotation(command) => {
+            if command.action == "create" {
+                if let Some(annotation) = command.annotation {
+                    state
+                        .daemon_state
+                        .annotations
+                        .lock()
+                        .await
+                        .create(annotation)
+                        .map_err(|message| {
+                            rejected(
+                                Some(cmd.command_id.clone()),
+                                ViewerRejectionReason::MalformedCommand,
+                                message,
+                            )
+                        })?;
+                }
+            }
+            let control = state.daemon_state.view_control.lock().await.snapshot();
+            Ok(accepted(
+                cmd.command_id,
+                control.control_version,
+                control.frame_seq,
+            ))
+        }
+        ViewerCommandPayload::Recording(_) => {
             let control = state.daemon_state.view_control.lock().await.snapshot();
             Ok(accepted(
                 cmd.command_id,
