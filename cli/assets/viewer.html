@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>gsd-cursor viewer</title>
-<style>
+<style nonce="__GSD_VIEWER_NONCE__">
   :root { color-scheme: dark; }
   html, body { margin: 0; padding: 0; background: #0a0a0c; color: #ddd; font-family: -apple-system, ui-sans-serif, system-ui, sans-serif; height: 100%; overflow: hidden; }
   #stage {
@@ -86,6 +86,49 @@
     border: 1px solid rgba(255,255,255,0.15);
     padding: 1px 5px;
     border-radius: 4px;
+  }
+  #approval {
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 11;
+    display: none;
+    width: min(420px, calc(100vw - 24px));
+    background: rgba(26, 22, 18, 0.94);
+    border: 1px solid rgba(255, 190, 110, 0.38);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    padding: 10px;
+    border-radius: 8px;
+  }
+  #approval.show {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+  #approval-summary {
+    font-size: 13px;
+    line-height: 1.25;
+    color: #ffe1b8;
+    overflow-wrap: anywhere;
+  }
+  #approval-origin {
+    display: block;
+    margin-top: 2px;
+    color: #b8aaa0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+  .approval-btn {
+    border: 1px solid rgba(255,255,255,0.16);
+    color: #f3f0eb;
+    background: rgba(255,255,255,0.08);
+    border-radius: 7px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  .approval-btn.primary {
+    background: rgba(255, 190, 110, 0.22);
+    border-color: rgba(255, 190, 110, 0.48);
   }
 
   /* History rail */
@@ -303,6 +346,15 @@
     transform: translate(-50%, -130%);
   }
   #ref-tip.show { opacity: 1; }
+  #text-proxy {
+    position: fixed;
+    left: -1000px;
+    top: -1000px;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+  }
 </style>
 </head>
 <body>
@@ -327,13 +379,24 @@
 <div id="goal"></div>
 <div id="history"></div>
 <img id="hist-preview" alt="">
-<div id="controls">
-  <button id="btn-pause" class="ctrl-btn">Pause<span class="key">␣</span></button>
-  <button id="btn-step" class="ctrl-btn">Step<span class="key">→</span></button>
-  <button id="btn-abort" class="ctrl-btn danger">Abort<span class="key">⎋</span></button>
+<div id="approval">
+  <div id="approval-summary"></div>
+  <button id="approval-approve" class="approval-btn primary">Approve</button>
+  <button id="approval-deny" class="approval-btn">Deny</button>
 </div>
+<div id="controls">
+  <button id="btn-control" class="ctrl-btn">Control</button>
+  <button id="btn-annotate" class="ctrl-btn">Annotate</button>
+  <button id="btn-record" class="ctrl-btn">Record</button>
+  <button id="btn-sensitive" class="ctrl-btn">Sensitive</button>
+  <button id="btn-pause" class="ctrl-btn">Pause<span class="key">Space</span></button>
+  <button id="btn-step" class="ctrl-btn">Step<span class="key">Right</span></button>
+  <button id="btn-resume" class="ctrl-btn">Resume</button>
+  <button id="btn-abort" class="ctrl-btn danger">Abort<span class="key">Esc</span></button>
+</div>
+<input id="text-proxy" autocomplete="off" autocapitalize="off" spellcheck="false" aria-hidden="true">
 
-<script>
+<script nonce="__GSD_VIEWER_NONCE__">
 const frame = document.getElementById('frame');
 const cursor = document.getElementById('cursor');
 const ring = document.getElementById('ring');
@@ -343,11 +406,65 @@ const refTip = document.getElementById('ref-tip');
 const label = document.getElementById('label');
 const wrap = document.getElementById('wrap');
 const status = document.getElementById('status');
-const historyOnly = new URLSearchParams(location.search).has('history');
+const params = new URLSearchParams(location.search);
+const historyOnly = params.has('history');
+const viewerState = {
+  sessionId: params.get("session") || "",
+  viewerId: params.get("viewer") || "",
+  token: params.get("token") || "",
+  owner: "agent",
+  controlVersion: 1,
+  frameSeq: 1,
+  mode: "observe",
+  recording: false,
+  sensitive: false,
+  approval: null,
+  latestFrame: null,
+  commandSeq: 1
+};
+history.replaceState(null, "", location.pathname + (historyOnly ? "?history=1" : ""));
 document.body.classList.toggle('history-only', historyOnly);
+let ws = null;
 
 let cursorPos = { x: 960, y: 540 };
 let currentViewport = { width: 1920, height: 1080 };
+
+function mapViewerPoint(event, frameMeta, wrapEl) {
+  const rect = wrapEl.getBoundingClientRect();
+  const viewportWidth = Number(frameMeta.viewportCssWidth || frameMeta.viewport?.width || 0);
+  const viewportHeight = Number(frameMeta.viewportCssHeight || frameMeta.viewport?.height || 0);
+  const scale = Math.min(rect.width / viewportWidth, rect.height / viewportHeight);
+  const renderedWidth = viewportWidth * scale;
+  const renderedHeight = viewportHeight * scale;
+  const letterboxX = (rect.width - renderedWidth) / 2;
+  const letterboxY = (rect.height - renderedHeight) / 2;
+  return {
+    x: (event.clientX - rect.left - letterboxX) / scale,
+    y: (event.clientY - rect.top - letterboxY) / scale,
+    scale,
+    letterboxX,
+    letterboxY
+  };
+}
+
+function nextCommandId() {
+  return `cmd_${Date.now()}_${viewerState.commandSeq++}`;
+}
+
+function sendViewerCommand(type, payload) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({
+    schema: "ViewerCommandV1",
+    commandId: nextCommandId(),
+    sessionId: viewerState.sessionId,
+    viewerId: viewerState.viewerId,
+    owner: viewerState.owner,
+    controlVersion: viewerState.controlVersion,
+    frameSeq: viewerState.frameSeq,
+    type,
+    payload
+  }));
+}
 
 function applyViewport(vp) {
   if (!vp || !vp.width || !vp.height) return;
@@ -447,15 +564,39 @@ function handleEvent(evt) {
   if (evt.type === 'snapshot') {
     setGoal(evt.goal);
     applyControlState(evt.control || 'running');
+    if (evt.sharedControl) applyControlState(evt.sharedControl);
+    renderApproval(evt.approval || null);
     for (const item of evt.history || []) handleEvent(item);
     return;
   }
   if (evt.viewport) applyViewport(evt.viewport);
   if (evt.type === 'frame') {
-    lastFrameDataUrl = 'data:image/jpeg;base64,' + evt.data;
+    viewerState.latestFrame = evt;
+    viewerState.frameSeq = evt.frameSeq || viewerState.frameSeq;
+    lastFrameDataUrl = 'data:image/jpeg;base64,' + (evt.dataBase64 || evt.data);
     frame.src = lastFrameDataUrl;
     return;
   }
+  if (evt.type === 'commandAccepted') {
+    viewerState.controlVersion = evt.controlVersion || viewerState.controlVersion;
+    viewerState.frameSeq = evt.frameSeq || viewerState.frameSeq;
+    setStatus(`accepted ${evt.commandId || ''}`, true);
+    return;
+  }
+  if (evt.type === 'commandRejected') {
+    setStatus(`rejected · ${evt.reason}: ${evt.message}`);
+    if (evt.reason === 'approval_required') {
+      renderApproval({
+        summary: 'Approval required',
+        origin: location.host,
+        expiresAtMs: Date.now() + 30000
+      });
+    }
+    return;
+  }
+  if (evt.controlVersion) viewerState.controlVersion = evt.controlVersion;
+  if (evt.frameSeq) viewerState.frameSeq = evt.frameSeq;
+  if (evt.control) applyControlState(evt.control);
   if (evt.type === 'intent') {
     if (evt.target?.bbox) {
       const aimRect = evt.target.bbox.aim || evt.target.bbox;
@@ -488,6 +629,7 @@ function handleEvent(evt) {
   }
   if (evt.type === 'control') {
     applyControlState(evt.state);
+    renderApproval(evt.approval || null);
     return;
   }
   if (evt.type === 'goal') {
@@ -598,48 +740,261 @@ document.addEventListener('keydown', (e) => {
     if (!refsVisible) refsGroup.innerHTML = '';
     setStatus(refsVisible ? 'live · refs ON · press R to hide' : 'live · refs hidden · press R to show', true);
   }
-  if (e.key === ' ') { e.preventDefault(); togglePause(); }
-  if (e.key === 'ArrowRight') { e.preventDefault(); sendControl('step'); }
-  if (e.key === 'Escape') { e.preventDefault(); sendControl('aborted'); }
+  if (e.key === ' ') { e.preventDefault(); sendControlAction(viewerState.mode === 'paused' ? 'release' : 'pause'); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); sendControlAction('step'); }
+  if (e.key === 'Escape') { e.preventDefault(); sendControlAction('abort'); }
 });
 
-// ── Control bar (pause / step / abort) ──────────────────────────────────
-let controlState = 'running';
+// ── Control bar and input forwarding ────────────────────────────────────
 const btnPause = document.getElementById('btn-pause');
 const btnStep = document.getElementById('btn-step');
 const btnAbort = document.getElementById('btn-abort');
+const btnControl = document.getElementById('btn-control');
+const btnAnnotate = document.getElementById('btn-annotate');
+const btnRecord = document.getElementById('btn-record');
+const btnSensitive = document.getElementById('btn-sensitive');
+const btnResume = document.getElementById('btn-resume');
+const textProxy = document.getElementById('text-proxy');
+const approvalEl = document.getElementById('approval');
+const approvalSummary = document.getElementById('approval-summary');
+const btnApprovalApprove = document.getElementById('approval-approve');
+const btnApprovalDeny = document.getElementById('approval-deny');
 
-async function sendControl(state) {
-  try {
-    await fetch('/control', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ state }),
-    });
-  } catch {}
+function sendControlAction(action, reason) {
+  sendViewerCommand("control", {
+    schema: "ControlCommandV1",
+    action,
+    reason: reason || null
+  });
 }
-function togglePause() {
-  sendControl(controlState === 'paused' ? 'running' : 'paused');
+
+function sendSensitive(enabled) {
+  viewerState.sensitive = enabled;
+  sendViewerCommand("sensitive", {
+    schema: "SensitiveCommandV1",
+    enabled,
+    reason: enabled ? "viewer sensitive mode" : "viewer sensitive mode off"
+  });
+  renderModeButtons();
 }
-btnPause.addEventListener('click', togglePause);
-btnStep.addEventListener('click', () => sendControl('step'));
-btnAbort.addEventListener('click', () => sendControl('aborted'));
+
+function renderApproval(approval) {
+  viewerState.approval = approval;
+  if (!approval) {
+    approvalEl.classList.remove('show');
+    approvalSummary.textContent = '';
+    return;
+  }
+  const seconds = Math.max(0, Math.ceil(((approval.expiresAtMs || Date.now()) - Date.now()) / 1000));
+  approvalSummary.innerHTML = `${escapeHtml(approval.summary || 'Approval required')} <span id="approval-origin">${escapeHtml(approval.origin || '')} · ${seconds}s</span>`;
+  approvalEl.classList.add('show');
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
+}
+
+function renderModeButtons() {
+  btnControl.classList.toggle('active', viewerState.mode === 'control');
+  btnAnnotate.classList.toggle('active', viewerState.mode === 'annotate');
+  btnRecord.classList.toggle('active', viewerState.recording);
+  btnSensitive.classList.toggle('active', viewerState.sensitive);
+  btnPause.classList.toggle('active', viewerState.mode === 'paused');
+  btnPause.textContent = viewerState.mode === 'paused' ? 'Paused' : 'Pause';
+}
+
+function userInputBase(kind) {
+  return {
+    schema: "UserInputEventV1",
+    inputId: `inp_${Date.now()}_${viewerState.commandSeq}`,
+    source: "viewer",
+    owner: "user",
+    controlVersion: viewerState.controlVersion,
+    frameSeq: viewerState.frameSeq,
+    coordinateSpace: "viewport_css",
+    kind
+  };
+}
+
+function forwardPointer(event, phase) {
+  if (viewerState.mode !== "control" || !viewerState.latestFrame) return;
+  event.preventDefault();
+  const point = mapViewerPoint(event, viewerState.latestFrame, wrap);
+  sendViewerCommand("input", {
+    ...userInputBase("pointer"),
+    phase,
+    x: point.x,
+    y: point.y,
+    button: event.button === 2 ? "right" : "left",
+    buttons: event.buttons || undefined
+  });
+  textProxy.focus({ preventScroll: true });
+}
+
+wrap.addEventListener("click", (event) => forwardPointer(event, "click"));
+wrap.addEventListener("click", (event) => {
+  if (viewerState.mode !== "annotate" || !viewerState.latestFrame) return;
+  event.preventDefault();
+  const point = mapViewerPoint(event, viewerState.latestFrame, wrap);
+  const annotationId = `ann_${Date.now()}_${viewerState.commandSeq}`;
+  sendViewerCommand("annotation", {
+    schema: "AnnotationCommandV1",
+    action: "create",
+    annotation: {
+      schema: "AnnotationV1",
+      annotationId,
+      sessionId: viewerState.sessionId,
+      viewerId: viewerState.viewerId,
+      pageId: null,
+      targetId: null,
+      frameId: "main",
+      frameSeq: viewerState.frameSeq,
+      kind: "point",
+      status: "open",
+      note: "Viewer annotation",
+      url: viewerState.latestFrame.url || "",
+      title: viewerState.latestFrame.title || "",
+      origin: location.origin,
+      createdBy: "user",
+      createdAtMs: Date.now(),
+      viewport: viewerState.latestFrame.viewport || {},
+      selection: {
+        coordinateSpace: "viewport_css",
+        box: { x: point.x, y: point.y, w: 1, h: 1 }
+      },
+      target: null,
+      artifactRefs: {},
+      partialReasons: viewerState.sensitive ? ["sensitive_redacted"] : [],
+      redactions: viewerState.sensitive ? ["sensitive_redacted"] : []
+    }
+  });
+}, { capture: true });
+wrap.addEventListener("contextmenu", (event) => forwardPointer(event, "context_click"));
+wrap.addEventListener("wheel", (event) => {
+  if (viewerState.mode !== "control" || !viewerState.latestFrame) return;
+  event.preventDefault();
+  const point = mapViewerPoint(event, viewerState.latestFrame, wrap);
+  sendViewerCommand("input", {
+    ...userInputBase("wheel"),
+    x: point.x,
+    y: point.y,
+    deltaX: event.deltaX,
+    deltaY: event.deltaY
+  });
+}, { passive: false });
+
+document.addEventListener("keydown", (event) => {
+  if (viewerState.mode !== "control" || event.metaKey || event.ctrlKey) return;
+  if (event.key.length !== 1 && !["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.key)) return;
+  event.preventDefault();
+  sendViewerCommand("input", {
+    ...userInputBase("key"),
+    phase: "press",
+    key: event.key,
+    code: event.code,
+    repeat: event.repeat,
+    modifiers: [
+      event.shiftKey ? "shift" : null,
+      event.altKey ? "alt" : null,
+      event.metaKey ? "meta" : null,
+      event.ctrlKey ? "ctrl" : null
+    ].filter(Boolean)
+  });
+});
+
+textProxy.addEventListener("beforeinput", (event) => {
+  if (viewerState.mode !== "control" || !event.data) return;
+  sendViewerCommand("input", {
+    ...userInputBase("text"),
+    text: event.data
+  });
+  event.preventDefault();
+});
+
+textProxy.addEventListener("paste", (event) => {
+  if (viewerState.mode !== "control") return;
+  const text = event.clipboardData?.getData("text/plain") || "";
+  if (!text) return;
+  sendViewerCommand("input", {
+    ...userInputBase("paste"),
+    text
+  });
+  event.preventDefault();
+});
+
+btnControl.addEventListener('click', () => {
+  viewerState.owner = "user";
+  viewerState.mode = "control";
+  sendControlAction('takeover');
+  textProxy.focus({ preventScroll: true });
+  renderModeButtons();
+});
+btnAnnotate.addEventListener('click', () => {
+  viewerState.owner = "user";
+  viewerState.mode = "annotate";
+  sendControlAction('annotate');
+  renderModeButtons();
+});
+btnRecord.addEventListener('click', () => {
+  viewerState.recording = !viewerState.recording;
+  sendViewerCommand("recording", {
+    schema: "RecordingCommandV1",
+    action: viewerState.recording ? "start" : "stop",
+    name: "viewer-flow",
+    recordingId: null
+  });
+  renderModeButtons();
+});
+btnSensitive.addEventListener('click', () => sendSensitive(!viewerState.sensitive));
+btnPause.addEventListener('click', () => {
+  viewerState.mode = "paused";
+  sendControlAction('pause');
+  renderModeButtons();
+});
+btnStep.addEventListener('click', () => sendControlAction('step'));
+btnResume.addEventListener('click', () => {
+  viewerState.mode = "observe";
+  viewerState.owner = "agent";
+  sendControlAction('release');
+  renderModeButtons();
+});
+btnAbort.addEventListener('click', () => sendControlAction('abort'));
+btnApprovalApprove.addEventListener('click', () => {
+  sendControlAction('approve', 'viewer approved risk gate');
+  renderApproval(null);
+});
+btnApprovalDeny.addEventListener('click', () => {
+  sendControlAction('deny', 'viewer denied risk gate');
+  renderApproval(null);
+});
 
 function applyControlState(state) {
-  controlState = state;
-  btnPause.classList.toggle('active', state === 'paused');
-  btnPause.textContent = state === 'paused' ? 'Resume' : 'Pause';
-  // re-add the keycap span
-  const k = document.createElement('span');
-  k.className = 'key'; k.textContent = '␣';
-  btnPause.appendChild(k);
-  if (state === 'aborted') {
-    setStatus('aborted · refresh page to reset', false);
+  if (typeof state === 'string') {
+    viewerState.mode = state === 'paused' ? 'paused' : 'observe';
+  } else if (state) {
+    viewerState.owner = state.owner || viewerState.owner;
+    viewerState.controlVersion = state.controlVersion || viewerState.controlVersion;
+    viewerState.frameSeq = state.frameSeq || viewerState.frameSeq;
+    viewerState.sensitive = Boolean(state.sensitive);
+    const mode = state.mode || "";
+    viewerState.mode = mode === "user-takeover" ? "control" :
+      mode === "annotating" ? "annotate" :
+      mode === "paused" ? "paused" :
+      mode === "sensitive" ? "control" :
+      "observe";
   }
+  renderModeButtons();
 }
 
 function connect() {
-  const ws = new WebSocket('ws://' + location.host + '/ws');
+  const query = new URLSearchParams({
+    session: viewerState.sessionId,
+    viewer: viewerState.viewerId,
+    token: viewerState.token
+  });
+  ws = new WebSocket('ws://' + location.host + '/ws?' + query.toString());
   ws.onopen = () => setStatus(`live · ${location.host}`, true);
   ws.onclose = () => { setStatus('disconnected · retrying…'); setTimeout(connect, 1000); };
   ws.onerror = () => setStatus('viewer connection error');

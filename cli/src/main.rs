@@ -420,6 +420,16 @@ enum Commands {
     Step,
     /// Abort the next action
     Abort,
+    /// Show shared control state
+    ControlState,
+    /// Let the viewer user control page input
+    Takeover,
+    /// Return page input ownership to the agent
+    ReleaseControl,
+    /// Enable sensitive local-only control mode
+    SensitiveOn,
+    /// Disable sensitive local-only control mode
+    SensitiveOff,
     /// Open the live viewer for this session
     View {
         /// Print the URL without opening it
@@ -428,6 +438,57 @@ enum Commands {
         /// Open the history-focused viewer
         #[arg(long)]
         history: bool,
+        /// Explicitly request the default interactive viewer
+        #[arg(long)]
+        interactive: bool,
+    },
+    /// List viewer annotations
+    Annotations,
+    /// Get one viewer annotation
+    AnnotationGet { id: String },
+    /// Clear one annotation or all annotations
+    AnnotationClear {
+        id: Option<String>,
+        #[arg(long)]
+        all: bool,
+    },
+    /// Mark an annotation resolved
+    AnnotationResolve { id: String },
+    /// Export annotations as JSON
+    AnnotationExport {
+        #[arg(long)]
+        output: String,
+    },
+    /// Ask the viewer user for an annotation
+    AnnotationRequest { note: String },
+    /// Start a flow recording
+    RecordStart {
+        #[arg(long)]
+        name: String,
+    },
+    /// Stop the active flow recording
+    RecordStop,
+    /// Pause the active flow recording
+    RecordPause,
+    /// Resume the active flow recording
+    RecordResume,
+    /// List flow recordings
+    Recordings,
+    /// Get a flow recording manifest
+    RecordingGet { id: String },
+    /// Export a flow recording
+    RecordingExport {
+        id: String,
+        #[arg(long)]
+        output: String,
+    },
+    /// Discard a flow recording
+    RecordingDiscard { id: String },
+    /// Validate a flow recording bundle path
+    RecordingValidate {
+        path: String,
+        #[arg(long)]
+        json: bool,
     },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
@@ -887,10 +948,78 @@ async fn main() {
         Commands::Resume => cmd_control(&cli, "resume").await,
         Commands::Step => cmd_control(&cli, "step").await,
         Commands::Abort => cmd_control(&cli, "abort").await,
+        Commands::ControlState => cmd_control(&cli, "control_state").await,
+        Commands::Takeover => cmd_control(&cli, "takeover").await,
+        Commands::ReleaseControl => cmd_control(&cli, "release_control").await,
+        Commands::SensitiveOn => cmd_control(&cli, "sensitive_on").await,
+        Commands::SensitiveOff => cmd_control(&cli, "sensitive_off").await,
         Commands::View {
             print_only,
             history,
+            interactive: _,
         } => cmd_view(&cli, *print_only, *history).await,
+        Commands::Annotations => cmd_control(&cli, "annotations").await,
+        Commands::AnnotationGet { id } => {
+            cmd_json_method(&cli, "annotation_get", serde_json::json!({ "id": id })).await
+        }
+        Commands::AnnotationClear { id, all } => {
+            cmd_json_method(
+                &cli,
+                "annotation_clear",
+                serde_json::json!({ "id": id, "all": all }),
+            )
+            .await
+        }
+        Commands::AnnotationResolve { id } => {
+            cmd_json_method(&cli, "annotation_resolve", serde_json::json!({ "id": id })).await
+        }
+        Commands::AnnotationExport { output } => {
+            cmd_json_method(
+                &cli,
+                "annotation_export",
+                serde_json::json!({ "output": output }),
+            )
+            .await
+        }
+        Commands::AnnotationRequest { note } => {
+            cmd_json_method(
+                &cli,
+                "annotation_request",
+                serde_json::json!({ "note": note }),
+            )
+            .await
+        }
+        Commands::RecordStart { name } => {
+            cmd_json_method(&cli, "record_start", serde_json::json!({ "name": name })).await
+        }
+        Commands::RecordStop => cmd_json_method(&cli, "record_stop", serde_json::json!({})).await,
+        Commands::RecordPause => cmd_json_method(&cli, "record_pause", serde_json::json!({})).await,
+        Commands::RecordResume => {
+            cmd_json_method(&cli, "record_resume", serde_json::json!({})).await
+        }
+        Commands::Recordings => cmd_json_method(&cli, "recordings", serde_json::json!({})).await,
+        Commands::RecordingGet { id } => {
+            cmd_json_method(&cli, "recording_get", serde_json::json!({ "id": id })).await
+        }
+        Commands::RecordingExport { id, output } => {
+            cmd_json_method(
+                &cli,
+                "recording_export",
+                serde_json::json!({ "id": id, "output": output }),
+            )
+            .await
+        }
+        Commands::RecordingDiscard { id } => {
+            cmd_json_method(&cli, "recording_discard", serde_json::json!({ "id": id })).await
+        }
+        Commands::RecordingValidate { path, json: _ } => {
+            cmd_json_method(
+                &cli,
+                "recording_validate",
+                serde_json::json!({ "path": path }),
+            )
+            .await
+        }
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
         Commands::VisualDiff {
@@ -1875,6 +2004,18 @@ async fn cmd_control(cli: &Cli, method: &str) -> CmdResult {
     handle_response(cli, resp, format_text_control)
 }
 
+async fn cmd_json_method(cli: &Cli, method: &str, params: serde_json::Value) -> CmdResult {
+    let resp = daemon_client::send_request(
+        method,
+        params,
+        cli.browser_path.as_deref(),
+        cli.cdp_url.as_deref(),
+        cli.session.as_deref(),
+    )
+    .await?;
+    handle_response(cli, resp, output::format_json)
+}
+
 async fn cmd_view(cli: &Cli, print_only: bool, history: bool) -> CmdResult {
     let resp = daemon_client::send_request(
         "view",
@@ -1898,7 +2039,8 @@ async fn cmd_view(cli: &Cli, print_only: bool, history: bool) -> CmdResult {
         .and_then(|value| value.as_str())
         .ok_or("view response missing url")?;
     let url = if history {
-        format!("{base_url}?history=1")
+        let sep = if base_url.contains('?') { "&" } else { "?" };
+        format!("{base_url}{sep}history=1")
     } else {
         base_url.to_string()
     };

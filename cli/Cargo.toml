@@ -1,6 +1,6 @@
 [package]
 name = "gsd-browser"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2021"
 description = "Browser automation CLI powered by Chrome DevTools Protocol"
 license = "MIT OR Apache-2.0"
@@ -38,7 +38,12 @@ reqwest = { workspace = true }
 axum = { version = "0.7", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 futures-util = "0.3"
 tokio-tungstenite = "0.24"
+tempfile = "3"

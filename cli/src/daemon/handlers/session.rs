@@ -375,31 +375,38 @@ pub async fn handle_debug_bundle(
     debug!("handle_debug_bundle: writing to {}", bundle_dir.display());
 
     let mut files_written: Vec<String> = Vec::new();
+    let control = state.view_control.lock().await.snapshot();
+    let privacy_policy = crate::daemon::view::privacy::policy_from_control(&control);
+    let omit_debug_payloads = privacy_policy
+        .capture_decision(crate::daemon::view::privacy::CaptureConsumer::DebugBundle)
+        == crate::daemon::view::privacy::CaptureDecision::OmitPayload;
 
     // 1. Screenshot
-    match super::screenshot::handle_screenshot(page, &json!({"format": "jpeg", "quality": 80}))
-        .await
-    {
-        Ok(screenshot_result) => {
-            if let Some(data_b64) = screenshot_result.get("data").and_then(|v| v.as_str()) {
-                match base64::engine::general_purpose::STANDARD.decode(data_b64) {
-                    Ok(bytes) => {
-                        let path = bundle_dir.join("screenshot.jpg");
-                        if let Err(e) = fs::write(&path, &bytes) {
-                            warn!("debug_bundle: failed to write screenshot: {e}");
-                        } else {
-                            files_written.push("screenshot.jpg".to_string());
+    if !omit_debug_payloads {
+        match super::screenshot::handle_screenshot(page, &json!({"format": "jpeg", "quality": 80}))
+            .await
+        {
+            Ok(screenshot_result) => {
+                if let Some(data_b64) = screenshot_result.get("data").and_then(|v| v.as_str()) {
+                    match base64::engine::general_purpose::STANDARD.decode(data_b64) {
+                        Ok(bytes) => {
+                            let path = bundle_dir.join("screenshot.jpg");
+                            if let Err(e) = fs::write(&path, &bytes) {
+                                warn!("debug_bundle: failed to write screenshot: {e}");
+                            } else {
+                                files_written.push("screenshot.jpg".to_string());
+                            }
                         }
+                        Err(e) => warn!("debug_bundle: failed to decode screenshot base64: {e}"),
                     }
-                    Err(e) => warn!("debug_bundle: failed to decode screenshot base64: {e}"),
                 }
             }
+            Err(e) => warn!("debug_bundle: screenshot failed: {e}"),
         }
-        Err(e) => warn!("debug_bundle: screenshot failed: {e}"),
     }
 
     // 2. Console logs
-    {
+    if !omit_debug_payloads {
         let entries = logs.console.snapshot();
         let json_str = serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
         let path = bundle_dir.join("console.json");
@@ -411,7 +418,7 @@ pub async fn handle_debug_bundle(
     }
 
     // 3. Network logs
-    {
+    if !omit_debug_payloads {
         let entries = logs.network.snapshot();
         let json_str = serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
         let path = bundle_dir.join("network.json");
@@ -423,7 +430,7 @@ pub async fn handle_debug_bundle(
     }
 
     // 4. Dialog logs
-    {
+    if !omit_debug_payloads {
         let entries = logs.dialog.snapshot();
         let json_str = serde_json::to_string_pretty(&entries).unwrap_or_else(|_| "[]".to_string());
         let path = bundle_dir.join("dialog.json");
@@ -463,40 +470,42 @@ pub async fn handle_debug_bundle(
     }
 
     // 7. Accessibility tree
-    match super::inspect::handle_accessibility_tree(
-        page,
-        &json!({"max_depth": 10, "max_count": 200}),
-    )
-    .await
-    {
-        Ok(tree_result) => {
-            let tree_text = tree_result
-                .get("tree")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let node_count = tree_result
-                .get("nodeCount")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let truncated = tree_result
-                .get("truncated")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false);
+    if !omit_debug_payloads {
+        match super::inspect::handle_accessibility_tree(
+            page,
+            &json!({"max_depth": 10, "max_count": 200}),
+        )
+        .await
+        {
+            Ok(tree_result) => {
+                let tree_text = tree_result
+                    .get("tree")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let node_count = tree_result
+                    .get("nodeCount")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
+                let truncated = tree_result
+                    .get("truncated")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
 
-            let md = format!(
-                "# Accessibility Tree\n\n{}\n\n---\n{} nodes{}",
-                tree_text,
-                node_count,
-                if truncated { " (truncated)" } else { "" }
-            );
-            let path = bundle_dir.join("accessibility-tree.md");
-            if let Err(e) = fs::write(&path, &md) {
-                warn!("debug_bundle: failed to write accessibility-tree.md: {e}");
-            } else {
-                files_written.push("accessibility-tree.md".to_string());
+                let md = format!(
+                    "# Accessibility Tree\n\n{}\n\n---\n{} nodes{}",
+                    tree_text,
+                    node_count,
+                    if truncated { " (truncated)" } else { "" }
+                );
+                let path = bundle_dir.join("accessibility-tree.md");
+                if let Err(e) = fs::write(&path, &md) {
+                    warn!("debug_bundle: failed to write accessibility-tree.md: {e}");
+                } else {
+                    files_written.push("accessibility-tree.md".to_string());
+                }
             }
+            Err(e) => warn!("debug_bundle: accessibility tree failed: {e}"),
         }
-        Err(e) => warn!("debug_bundle: accessibility tree failed: {e}"),
     }
 
     let bundle_path = bundle_dir.to_string_lossy().to_string();
@@ -510,6 +519,11 @@ pub async fn handle_debug_bundle(
         "path": bundle_path,
         "files": files_written,
         "fileCount": files_written.len(),
+        "redactionStatus": {
+            "sensitive": privacy_policy.sensitive,
+            "policyEpoch": privacy_policy.epoch,
+            "payloadsOmitted": omit_debug_payloads,
+        }
     }))
 }
 

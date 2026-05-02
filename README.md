@@ -1,6 +1,6 @@
 # gsd-browser
 
-Native Rust browser automation CLI for Chrome/Chromium via CDP. `gsd-browser` keeps a persistent background daemon, auto-starts on first use, and exposes 63 top-level commands for navigation, interaction, snapshots with versioned refs, assertions, structured extraction, network control, visual diffing, tracing, and stateful auth flows.
+Native Rust browser automation CLI for Chrome/Chromium via CDP. `gsd-browser` keeps a persistent background daemon, auto-starts on first use, and exposes 92 top-level commands for navigation, interaction, authenticated live viewing, annotations, recording bundles, snapshots with versioned refs, assertions, structured extraction, network control, visual diffing, tracing, and stateful auth flows.
 
 Built for AI agents, CI pipelines, and developers who want deterministic browser control without adopting a full browser test framework.
 
@@ -60,9 +60,43 @@ gsd-browser assert --checks '[{"kind":"url_contains","text":"iana.org"}]'
 gsd-browser screenshot --output page.png --format png
 ```
 
+## Interactive Workbench
+
+`gsd-browser view` starts an authenticated localhost workbench for the active session. The URL is bound to the session, viewer id, loopback origin, expiry, and viewer capabilities. Use `view --print-only` when another tool needs the URL.
+
+```bash
+gsd-browser view
+gsd-browser view --print-only
+gsd-browser control-state
+gsd-browser takeover
+gsd-browser release-control
+gsd-browser sensitive-on
+gsd-browser sensitive-off
+```
+
+The viewer streams the real Chrome page, forwards pointer, wheel, keyboard, text, and paste input while in Control mode, creates annotations in Annotate mode, and starts/stops local recording bundles in Record mode. Sensitive mode keeps local human control available while cloud frame capture and evidence surfaces use redaction policy.
+
+Annotations and recordings stay local to the daemon state directory:
+
+```bash
+gsd-browser annotations
+gsd-browser annotation-get <id>
+gsd-browser annotation-clear <id>
+gsd-browser annotation-resolve <id>
+gsd-browser annotation-export --output annotations.json
+
+gsd-browser record-start --name checkout-bug
+gsd-browser record-stop
+gsd-browser recordings
+gsd-browser recording-get <id>
+gsd-browser recording-export <id> --output <path>
+gsd-browser recording-discard <id>
+gsd-browser recording-validate <id-or-path> --json
+```
+
 ## Command Surface
 
-`gsd-browser` currently exposes 63 top-level commands:
+`gsd-browser` currently exposes 92 top-level commands:
 
 | Area | Commands |
 |------|----------|
@@ -75,6 +109,9 @@ gsd-browser screenshot --output page.png --format png
 | Assertions & batching | `assert`, `diff`, `batch` |
 | Pages & frames | `list-pages`, `switch-page`, `close-page`, `list-frames`, `select-frame` |
 | Forms & semantic actions | `analyze-form`, `fill-form`, `find-best`, `act` |
+| Live workbench | `goal`, `view`, `control-state`, `takeover`, `release-control`, `pause`, `resume`, `step`, `abort`, `sensitive-on`, `sensitive-off` |
+| Annotations | `annotations`, `annotation-get`, `annotation-clear`, `annotation-resolve`, `annotation-export`, `annotation-request` |
+| Recording bundles | `record-start`, `record-stop`, `record-pause`, `record-resume`, `recordings`, `recording-get`, `recording-export`, `recording-discard`, `recording-validate` |
 | Diagnostics | `timeline`, `session-summary`, `debug-bundle` |
 | Screenshots & document output | `screenshot`, `zoom-region`, `save-pdf` |
 | Visual regression | `visual-diff` |
@@ -94,6 +131,7 @@ gsd-browser screenshot --output page.png --format png
 - Shared inspection semantics across `snapshot`, `find`, `wait-for`, `assert`, and ref-driven actions
 - Semantic `find-best` and `act` flows covering 15 built-in intents
 - Named sessions via `--session` for isolated parallel browser workers
+- Authenticated local viewer with human takeover, pause/step/abort, annotations, sensitive mode, and bounded recording bundles
 - Structured JSON output on every command via `--json`
 - Visual diffing, HAR export, PDF generation, and CDP tracing in the same tool
 - Saved browser state plus encrypted credential replay through the auth vault
