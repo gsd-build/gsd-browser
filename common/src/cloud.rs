@@ -230,6 +230,70 @@ impl<'de> Deserialize<'de> for CloudUserInput {
 }
 
 impl CloudUserInput {
+    pub fn into_user_input_event(
+        self,
+        default_source: &str,
+    ) -> Result<crate::viewer::UserInputEventV1, String> {
+        use crate::viewer::{
+            ControlOwner, CoordinateSpace, UserInputEventV1, UserInputKind, UserInputSource,
+        };
+
+        let source = match default_source {
+            "cloud" => UserInputSource::Cloud,
+            "viewer" => UserInputSource::Viewer,
+            other => return Err(format!("unsupported input source: {other}")),
+        };
+        let owner = match self.owner.as_deref().unwrap_or("agent") {
+            "agent" => ControlOwner::Agent,
+            "user" => ControlOwner::User,
+            "system" => ControlOwner::System,
+            other => return Err(format!("unsupported owner: {other}")),
+        };
+        let kind = match self.kind.as_str() {
+            "pointer" => UserInputKind::Pointer,
+            "wheel" => UserInputKind::Wheel,
+            "key" => UserInputKind::Key,
+            "text" => UserInputKind::Text,
+            "paste" => UserInputKind::Paste,
+            "composition" => UserInputKind::Composition,
+            "navigation" => UserInputKind::Navigation,
+            other => return Err(format!("unsupported user input kind: {other}")),
+        };
+
+        let event = UserInputEventV1 {
+            schema: crate::viewer::USER_INPUT_SCHEMA.to_string(),
+            input_id: self.input_id,
+            source,
+            owner,
+            control_version: self.control_version.unwrap_or_default(),
+            frame_seq: self.frame_seq.unwrap_or_default(),
+            page_id: None,
+            target_id: None,
+            frame_id: None,
+            coordinate_space: CoordinateSpace::ViewportCss,
+            kind,
+            phase: self.phase,
+            x: self.x,
+            y: self.y,
+            text: self.text,
+            key: self.key,
+            code: self.code,
+            location: self.location,
+            repeat: self.repeat,
+            button: self.button,
+            buttons: self.buttons,
+            click_count: self.click_count,
+            pointer_type: self.pointer_type,
+            modifiers: self.modifiers,
+            delta_x: self.delta_x,
+            delta_y: self.delta_y,
+            url: self.url,
+            action: self.action,
+        };
+        event.validate()?;
+        Ok(event)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if let Some(coordinate_space) = self.coordinate_space.as_deref() {
             if coordinate_space != CLOUD_INPUT_COORDINATE_SPACE {

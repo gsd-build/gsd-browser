@@ -5,6 +5,7 @@ pub mod identity;
 pub mod ipc;
 pub mod session;
 pub mod types;
+pub mod viewer;
 
 use serde::{Deserialize, Serialize};
 
