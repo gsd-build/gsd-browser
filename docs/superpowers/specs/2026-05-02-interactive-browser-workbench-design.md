@@ -100,7 +100,20 @@ The token is HMAC-signed and binds:
 - `expiresAtMs`
 - `capabilities`
 
-Viewer HTML, WebSocket upgrades, `/control`, `/input`, `/annotation`, `/recording`, and log export endpoints require the token. State-changing HTTP endpoints also require a matching `Origin` header. WebSocket upgrades validate token, `Origin`, session, viewer id, expiry, and loopback host before accepting the connection.
+Viewer HTML, WebSocket upgrades, `/control`, `/input`, `/annotation`, `/recording`, and log export endpoints require the token. State-changing HTTP endpoints also require a matching `Origin` header. WebSocket upgrades validate token, `Origin`, session, viewer id, expiry, required capability, and loopback host before accepting the connection.
+
+Capability mapping:
+
+- `view`: viewer HTML and local frame stream
+- `state`: page/control/recording state reads
+- `input`: page input
+- `control`: pause, resume, step, takeover, release
+- `annotation`: annotation create/list/get/resolve/clear
+- `recording`: record start/pause/resume/stop/list/get/discard
+- `export`: bundle, log, and annotation export
+- `sensitive`: sensitive mode entry and exit
+
+Viewer HTML responses include `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and CSP `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'`. The viewer reads the token into memory and removes the token from the address bar with `history.replaceState`.
 
 Rejected requests produce forensic events with reason codes:
 
@@ -147,11 +160,10 @@ Shared control is a versioned lease.
 - `step`
 - `approval-required`
 - `annotating`
-- `recording`
 - `sensitive`
 - `aborted`
 
-`recording` is an overlay flag, not exclusive with control owner. The viewer may record while `agent-running`, `user-takeover`, or `annotating`.
+Recording state is an overlay field in viewer/page state, not a control mode. The viewer may record while `agent-running`, `user-takeover`, or `annotating`.
 
 ### Validation Order
 
@@ -265,7 +277,7 @@ Unsupported flows return explicit errors:
 
 ## Risk Gate
 
-The daemon evaluates high-impact actions before dispatch. Risk detection uses URL/origin, element role/name/text, input kind, visible labels, form context, and destination.
+The daemon evaluates high-impact actions before dispatch through one shared page-effect authorization path. Viewer WebSocket, HTTP `/input`, cloud input, CLI page actions, navigation, file/download commands, recording/export actions, and annotation export use the same control, privacy, and risk gates. Risk detection uses URL/origin, element role/name/text, input kind, visible labels, form context, and destination.
 
 Risk categories:
 
@@ -297,6 +309,8 @@ Risky actions enter `approval-required` with:
 ```
 
 Timeout defaults to deny. Approval and denial are recorded as control events.
+
+Approval stores the exact pending command hash. Approval dispatches only that pending command. Pointer risk uses target metadata resolved from current refs, accessibility, or DOM at the viewport coordinate; URL/navigation/text risk runs even when target metadata is unavailable.
 
 ## Privacy Mode
 
@@ -571,6 +585,8 @@ Screenshots and DOM/ref snapshots are captured after navigation, before and afte
 
 Sensitive mode writes a redacted interval event and omits capture payloads.
 
+Default recording privacy policy excludes cookies, localStorage, sessionStorage, request bodies, response bodies, authorization headers, set-cookie headers, and raw request/response payloads. Full URLs are written with sensitive query parameters redacted. Screenshots, DOM snapshots, annotation crops, and full-frame annotation artifacts are omitted during sensitive mode.
+
 ## CLI and API Surface
 
 ### Viewer
@@ -623,6 +639,7 @@ gsd-browser recordings
 gsd-browser recording-get <id>
 gsd-browser recording-export <id> --output <path>
 gsd-browser recording-discard <id>
+gsd-browser recording-validate <id|path> --json
 ```
 
 ## Page State Tracking
@@ -697,7 +714,7 @@ Errors are viewer-visible and recorded in the timeline or recording event stream
 
 ### Browser Verification
 
-Use Browser Use for the final local UX pass when available:
+Use Browser Use for the final local UX pass:
 
 - open `gsd-browser view`
 - click target button through the viewer
@@ -711,7 +728,7 @@ Use Browser Use for the final local UX pass when available:
 - enter sensitive mode and verify redacted frame/log behavior
 - repeat desktop and mobile viewport sizes
 
-When Browser Use is unavailable, use `gsd-browser` plus the local spike harnesses and state assertions.
+When Browser Use is unavailable, record the missing Browser Use gate as a verification blocker and run `gsd-browser` plus the local spike harnesses and state assertions as diagnostic evidence.
 
 ### Standard Repo Verification
 

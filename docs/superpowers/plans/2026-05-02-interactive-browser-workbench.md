@@ -49,6 +49,25 @@ Spike evidence:
 - Modify `cli/assets/viewer.html`: add control mode, annotation mode, recording controls, sensitive indicator, coordinate mapping, input forwarding, and WebSocket command handling.
 - Modify `cli/Cargo.toml`: add `hmac = "0.12"`, `sha2 = "0.10"`, `hex = "0.4"`, and `uuid = { version = "1", features = ["v4", "serde"] }`.
 
+## Audit-Hardened Execution Requirements
+
+These requirements are authoritative for every task:
+
+- Test-first tasks export the module path before the fail-run command: `common/src/lib.rs` exports `viewer`; `cli/src/daemon/view/mod.rs` exports `auth`, `control`, `input`, `privacy`, `annotations`, `recording`, and `risk`; `cli/src/daemon/mod.rs` exports `input_dispatch`.
+- `ViewState` carries `daemon_state: Arc<DaemonState>` and `active_page_rx: tokio::sync::watch::Receiver<Arc<Page>>`. WebSocket and HTTP input handlers use the active page receiver and daemon state for authorization, privacy, recording, and dispatch.
+- All page-effect paths use one shared daemon authorization function. Viewer WebSocket, HTTP `/input`, cloud input, CLI navigation/actions, file/download actions, recording/export actions, and annotation export call the same control, privacy, and risk gates.
+- `dispatch_user_input` has the contract `dispatch_user_input(page: &Page, state: &DaemonState, input: &UserInputEventV1)`. Navigation dispatch calls `handlers::navigate::handle_navigate(page, &json!({"url": url}), state).await`.
+- Viewer token checks include required capabilities. Route and command mappings are: `view`, `state`, `input`, `control`, `annotation`, `recording`, `export`, and `sensitive`.
+- Viewer HTML responses include `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and CSP `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'`. The viewer reads the token into memory and calls `history.replaceState` to remove it from the address bar.
+- Viewer auth includes refresh over the authenticated WebSocket, an expiry countdown, read-only expiry behavior, and a CLI path to mint a fresh viewer URL.
+- Frame messages use `frameSeq` and `dataBase64` as the serialized fields consumed by the viewer.
+- Recording is an overlay state, not a `ControlMode`.
+- Browser Use verification is required for viewer UI behavior. The fallback path is a failure report, not a passing final gate.
+- Recording implementation includes `gsd-browser recording-validate <id|path> --json` and corruption tests for missing manifest, bad hash, missing start/stop, event sequence gap, unredacted token, missing referenced frame, and malformed JSONL.
+- Annotation and recording writes pass through `PrivacyGuard`. Sensitive mode stores annotation geometry with `partialReasons: ["sensitive_redacted"]` and omits crops, full frames, DOM ancestry, cookies, storage, auth headers, request bodies, and raw payloads.
+- Risk approval stores an exact pending command hash. Approval dispatches only that pending command. Pointer risk uses target metadata resolved from current refs/accessibility/DOM at the viewport coordinate; URL/navigation/text risk runs without target metadata.
+- Final release work bumps Rust crate versions, the npm wrapper version, and `CLOUD_TOOL_RUNTIME_MIN_VERSION` for cloud-visible contract changes.
+
 ## Task 1: Shared Protocol Types
 
 **Files:**
@@ -56,6 +75,14 @@ Spike evidence:
 - Modify: `common/src/lib.rs`
 - Modify: `common/src/cloud.rs`
 - Test: `common/src/viewer.rs`
+
+- [ ] **Step 0: Export module for test discovery**
+
+Add to `common/src/lib.rs`:
+
+```rust
+pub mod viewer;
+```
 
 - [ ] **Step 1: Write shared protocol tests**
 
@@ -108,7 +135,7 @@ mod tests {
 
     #[test]
     fn user_input_rejects_missing_pointer_coordinates() {
-        let err = serde_json::from_value::<UserInputEventV1>(json!({
+        let input = serde_json::from_value::<UserInputEventV1>(json!({
             "schema": "UserInputEventV1",
             "inputId": "inp_2",
             "source": "viewer",
@@ -118,9 +145,10 @@ mod tests {
             "coordinateSpace": "viewport_css",
             "kind": "pointer",
             "phase": "click"
-        })).expect_err("pointer x/y required");
+        })).expect("deserialize shape");
 
-        assert!(err.to_string().contains("pointer input requires x and y"));
+        let err = input.validate().expect_err("pointer x/y required");
+        assert!(err.contains("pointer input requires x and y"));
     }
 
     #[test]
@@ -245,18 +273,12 @@ pub struct ViewerCommandV1 {
     pub payload: ViewerCommandPayload,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "schema")]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ViewerCommandPayload {
-    #[serde(rename = "UserInputEventV1")]
     Input(UserInputEventV1),
-    #[serde(rename = "ControlCommandV1")]
     Control(ControlCommandV1),
-    #[serde(rename = "AnnotationCommandV1")]
     Annotation(AnnotationCommandV1),
-    #[serde(rename = "RecordingCommandV1")]
     Recording(RecordingCommandV1),
-    #[serde(rename = "SensitiveCommandV1")]
     Sensitive(SensitiveCommandV1),
 }
 
@@ -373,6 +395,8 @@ pub enum ViewerRejectionReason {
 ```
 
 Add the annotation, recording, and page state structs in the same file with only `Serialize`, `Deserialize`, `Debug`, and `Clone` fields from the spec. Keep fields typed as primitives, `Vec<T>`, and `serde_json::Value` where DOM-specific payloads vary.
+
+Implement custom `Deserialize` for `ViewerCommandPayload`. The deserializer reads the full payload as `serde_json::Value`, inspects `value["schema"]`, and deserializes the original value into the matching struct. This preserves the nested `schema` field for `UserInputEventV1` and all command payloads.
 
 - [ ] **Step 4: Add validation helpers**
 
@@ -548,7 +572,7 @@ mod tests {
             capabilities: vec!["view".to_string(), "input".to_string()],
         }).expect("token");
 
-        let claims = issuer.verify(&token, "sess_1", "view_1", "http://127.0.0.1:7777", 1500)
+        let claims = issuer.verify(&token, "sess_1", "view_1", "http://127.0.0.1:7777", 1500, Some("input"))
             .expect("valid claims");
         assert_eq!(claims.viewer_id, "view_1");
         assert!(claims.capabilities.iter().any(|cap| cap == "input"));
@@ -567,7 +591,7 @@ mod tests {
             capabilities: vec!["view".to_string()],
         }).expect("token");
 
-        let err = issuer.verify(&token, "sess_1", "view_1", "http://localhost:7777", 1500)
+        let err = issuer.verify(&token, "sess_1", "view_1", "http://localhost:7777", 1500, Some("view"))
             .expect_err("origin rejected");
         assert_eq!(err.reason, AuthRejectReason::WrongOrigin);
     }
@@ -585,9 +609,27 @@ mod tests {
             capabilities: vec!["view".to_string()],
         }).expect("token");
 
-        let err = issuer.verify(&token, "sess_1", "view_1", "http://127.0.0.1:7777", 2001)
+        let err = issuer.verify(&token, "sess_1", "view_1", "http://127.0.0.1:7777", 2001, Some("view"))
             .expect_err("expired rejected");
         assert_eq!(err.reason, AuthRejectReason::ExpiredToken);
+    }
+
+    #[test]
+    fn token_rejects_missing_required_capability() {
+        let issuer = issuer();
+        let token = issuer.issue(ViewerTokenClaims {
+            audience: VIEWER_AUDIENCE.to_string(),
+            session_id: "sess_1".to_string(),
+            viewer_id: "view_1".to_string(),
+            origin: "http://127.0.0.1:7777".to_string(),
+            issued_at_ms: 1000,
+            expires_at_ms: 2000,
+            capabilities: vec!["view".to_string()],
+        }).expect("token");
+
+        let err = issuer.verify(&token, "sess_1", "view_1", "http://127.0.0.1:7777", 1500, Some("input"))
+            .expect_err("capability rejected");
+        assert_eq!(err.reason, AuthRejectReason::CapabilityDenied);
     }
 
     #[test]
@@ -642,6 +684,7 @@ pub const VIEWER_AUDIENCE: &str = "gsd-browser-viewer";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewerTokenClaims {
+    #[serde(rename = "aud")]
     pub audience: String,
     pub session_id: String,
     pub viewer_id: String,
@@ -708,6 +751,7 @@ impl ViewerTokenIssuer {
         viewer_id: &str,
         origin: &str,
         now_ms: u64,
+        required_capability: Option<&str>,
     ) -> Result<ViewerTokenClaims, AuthReject> {
         let (claims_b64, sig_b64) = token
             .split_once('.')
@@ -742,6 +786,11 @@ impl ViewerTokenIssuer {
         if claims.expires_at_ms < now_ms {
             return Err(AuthReject { reason: AuthRejectReason::ExpiredToken });
         }
+        if let Some(required) = required_capability {
+            if !claims.capabilities.iter().any(|cap| cap == required) {
+                return Err(AuthReject { reason: AuthRejectReason::CapabilityDenied });
+            }
+        }
         Ok(claims)
     }
 }
@@ -766,6 +815,8 @@ pub token_issuer: crate::daemon::view::auth::ViewerTokenIssuer,
 pub session_id: String,
 pub viewer_id: String,
 pub origin: String,
+pub daemon_state: Arc<crate::daemon::state::DaemonState>,
+pub active_page_rx: tokio::sync::watch::Receiver<Arc<chromiumoxide::Page>>,
 ```
 
 In `start_for_session`, create `viewer_id = uuid::Uuid::new_v4().to_string()`, `origin = format!("http://127.0.0.1:{port}")`, issue a token, and return `url = format!("{origin}/?session={session_id}&viewer={viewer_id}&token={token}")`.
@@ -783,7 +834,17 @@ fn query_param(uri: &axum::http::Uri, key: &str) -> Option<String> {
 }
 ```
 
-Use it in root, `/control`, `/input`, `/annotation`, `/recording`, and `/ws` handlers. For state mutation endpoints, compare `Origin` header with `state.origin`. Return `401` for token failures and `403` for wrong origin.
+Use it in root, `/control`, `/input`, `/annotation`, `/recording`, and `/ws` handlers. For state mutation endpoints, compare `Origin` header with `state.origin`. Return `401` for token failures, `403` for wrong origin, and `403` for `CapabilityDenied`. Root and frame stream require `view`; `/state` requires `state`; `/input` requires `input`; `/control` requires `control`; `/annotation` requires `annotation`; `/recording` requires `recording`; export endpoints require `export`; sensitive commands require `sensitive`.
+
+Set these headers on viewer HTML responses:
+
+```text
+Referrer-Policy: no-referrer
+Cache-Control: no-store
+Content-Security-Policy: default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'
+```
+
+Add tests for capability denial and security headers.
 
 - [ ] **Step 7: Run auth tests**
 
@@ -1053,6 +1114,16 @@ Initialize it with `SharedControlStore::new()`.
 
 Modify `handle_pause`, `handle_resume`, and `handle_view_status` in `cli/src/daemon/handlers/narration_cmds.rs` so they return `SharedControlStateV1` JSON. Add daemon methods for `takeover`, `release_control`, `sensitive_on`, and `sensitive_off` in the dispatcher in `cli/src/daemon/mod.rs`.
 
+Add `cli/src/main.rs` `Commands` variants and match arms for:
+
+- `ControlState`
+- `Takeover`
+- `ReleaseControl`
+- `SensitiveOn`
+- `SensitiveOff`
+
+Extend `View` with `interactive: bool`. Interactive mode is the default; `--interactive` is accepted as an explicit no-op for script readability.
+
 - [ ] **Step 6: Run state machine tests**
 
 ```bash
@@ -1107,6 +1178,8 @@ mod tests {
 }
 ```
 
+Implement `mouse_buttons_mask(button: &str) -> Result<i64, String>` as the public pure helper for these tests. CDP-specific conversion from string to `MouseButton` stays inside dispatch helpers.
+
 - [ ] **Step 2: Run the test and verify it fails**
 
 ```bash
@@ -1117,7 +1190,7 @@ Expected: FAIL with unresolved module.
 
 - [ ] **Step 3: Move CDP dispatch helpers**
 
-Move these functions from `cli/src/daemon/handlers/cloud.rs` into `cli/src/daemon/input_dispatch.rs`:
+Move these functions from `cli/src/daemon/handlers/cloud.rs` into `cli/src/daemon/input_dispatch.rs` and adapt them to canonical `UserInputEventV1`:
 
 - `modifier_mask`
 - `mouse_button`
@@ -1127,12 +1200,18 @@ Move these functions from `cli/src/daemon/handlers/cloud.rs` into `cli/src/daemo
 - `dispatch_key`
 - `dispatch_text`
 - `viewport_center`
+- `dispatch_pointer`
+- `dispatch_wheel`
+- `dispatch_key_input`
+- `dispatch_text_input`
+- `dispatch_navigation`
 
 Expose one async entrypoint:
 
 ```rust
 pub async fn dispatch_user_input(
     page: &chromiumoxide::Page,
+    state: &crate::daemon::state::DaemonState,
     input: &gsd_browser_common::viewer::UserInputEventV1,
 ) -> Result<serde_json::Value, String> {
     input.validate()?;
@@ -1144,7 +1223,7 @@ pub async fn dispatch_user_input(
         gsd_browser_common::viewer::UserInputKind::Text
         | gsd_browser_common::viewer::UserInputKind::Paste
         | gsd_browser_common::viewer::UserInputKind::Composition => dispatch_text_input(page, input).await,
-        gsd_browser_common::viewer::UserInputKind::Navigation => dispatch_navigation(page, input).await,
+        gsd_browser_common::viewer::UserInputKind::Navigation => dispatch_navigation(page, state, input).await,
     }
 }
 ```
@@ -1156,14 +1235,21 @@ Replace the body of `handle_cloud_user_input` with:
 ```rust
 pub async fn handle_cloud_user_input(
     page: &Page,
-    _state: &DaemonState,
+    state: &DaemonState,
     params: &Value,
 ) -> Result<Value, String> {
     let cloud: CloudUserInput = serde_json::from_value(params.clone()).map_err(|err| err.to_string())?;
     let input = cloud.into_user_input_event("cloud")?;
-    crate::daemon::input_dispatch::dispatch_user_input(page, &input).await
+    crate::daemon::view::control::authorize_page_effect(
+        state,
+        crate::daemon::view::control::PageEffectSource::Cloud,
+        &input,
+    ).await?;
+    crate::daemon::input_dispatch::dispatch_user_input(page, state, &input).await
 }
 ```
+
+Add tests for cloud input rejection while paused, during user takeover, during sensitive mode, and while approval is required.
 
 - [ ] **Step 5: Export module**
 
@@ -1324,8 +1410,9 @@ In `cli/src/daemon/view/ws.rs`, replace `Some(Ok(_)) => {}` with logic that:
 2. Calls `parse_viewer_command`.
 3. Validates command token/session/viewer through the authenticated WebSocket context.
 4. Authorizes input through `SharedControlStore`.
-5. Dispatches `ViewerCommandPayload::Input` through `input_dispatch::dispatch_user_input`.
-6. Sends `ViewerCommandAccepted` or `ViewerCommandRejected`.
+5. Calls shared page-effect authorization, privacy, risk, and recording hooks.
+6. Dispatches `ViewerCommandPayload::Input` through `input_dispatch::dispatch_user_input`.
+7. Sends `ViewerCommandAccepted` or `ViewerCommandRejected`.
 
 Keep binary messages rejected with `MalformedCommand`.
 
@@ -1337,7 +1424,7 @@ Add route:
 .route("/input", post(post_input))
 ```
 
-`post_input` uses the same parser and handler as WebSocket, then returns JSON accepted/rejected response. This endpoint exists for deterministic tests and simple clients.
+`post_input` uses the same parser and handler as WebSocket, then returns JSON accepted/rejected response. This endpoint exists for deterministic tests and simple clients. It uses `ViewState.active_page_rx.borrow().clone()` for the active page and `ViewState.daemon_state` for authorization and dispatch.
 
 - [ ] **Step 6: Run parser tests and compile**
 
@@ -1487,9 +1574,11 @@ Expand `FrameMessage` in `cli/src/daemon/view/capture.rs`:
 pub struct FrameMessage {
     #[serde(rename = "type")]
     ty: &'static str,
-    pub sequence: u64,
+    #[serde(rename = "frameSeq")]
+    pub frame_seq: u64,
     pub content_type: &'static str,
-    pub data: String,
+    #[serde(rename = "dataBase64")]
+    pub data_base64: String,
     pub viewport: ViewportInfo,
     pub capture_pixel_width: u32,
     pub capture_pixel_height: u32,
@@ -1502,7 +1591,7 @@ pub struct FrameMessage {
 }
 ```
 
-Use viewport CSS size from page evaluation, capture pixel size from screenshot/screencast metadata, and monotonically increasing sequence from shared page state.
+Use viewport CSS size from page evaluation, capture pixel size from screenshot/screencast metadata, and monotonically increasing `frameSeq` from shared page state.
 
 - [ ] **Step 5: Add page state broadcaster**
 
@@ -1558,8 +1647,9 @@ git commit -m "feat: add page state and privacy guard"
 
 **Files:**
 - Modify: `cli/assets/viewer.html`
+- Create: `cli/assets/viewer-coordinate.test.mjs`
 - Modify: `cli/src/daemon/view/viewer_html.rs`
-- Test: manual Browser Use pass, plus embedded asset compile through `cargo build --workspace`
+- Test: Browser Use pass, coordinate harness, plus embedded asset compile through `cargo build --workspace`
 
 - [ ] **Step 1: Add pure coordinate mapping function**
 
@@ -1585,6 +1675,18 @@ function mapViewerPoint(event, frameMeta, wrapEl) {
 }
 ```
 
+- [ ] **Step 1a: Add coordinate harness**
+
+Create `cli/assets/viewer-coordinate.test.mjs` with table-driven cases for DPR 1, DPR 2, wide letterbox, tall letterbox, resized wrapper, scrolled page, and capture-size mismatch. The test imports or duplicates only the pure `mapViewerPoint` math and asserts viewport CSS coordinates, not screenshot pixels.
+
+Run:
+
+```bash
+node cli/assets/viewer-coordinate.test.mjs
+```
+
+Expected: PASS with all coordinate scenarios.
+
 - [ ] **Step 2: Add control mode state**
 
 Add viewer-local state:
@@ -1594,16 +1696,19 @@ const viewerState = {
   sessionId: new URLSearchParams(location.search).get("session") || "",
   viewerId: new URLSearchParams(location.search).get("viewer") || "",
   token: new URLSearchParams(location.search).get("token") || "",
-  owner: "user",
+  owner: "agent",
   controlVersion: 0,
   frameSeq: 0,
-  mode: "control",
+  mode: "observe",
   recording: false,
   sensitive: false,
   latestFrame: null,
   commandSeq: 1
 };
+history.replaceState(null, "", location.pathname);
 ```
+
+Initialize `owner`, `mode`, `controlVersion`, and `frameSeq` from the server `SharedControlState`. In `agent-running`, render observe-only UI and disable input forwarding. The Control button requests takeover; input forwarding starts only after takeover succeeds. Rejections render inline in the status area.
 
 - [ ] **Step 3: Add command sender**
 
@@ -1676,6 +1781,7 @@ When messages include `controlVersion`, `frameSeq`, `control`, `pageState`, or `
 - [ ] **Step 7: Build**
 
 ```bash
+node cli/assets/viewer-coordinate.test.mjs
 cargo build --workspace
 ```
 
@@ -1691,12 +1797,12 @@ cargo run -p gsd-browser -- navigate https://example.com
 cargo run -p gsd-browser -- view --print-only
 ```
 
-Use Browser Use to open the printed URL, click through the viewer, scroll, and verify the page receives input. If Browser Use is unavailable, use the `/input` endpoint with curl and inspect `snapshot`.
+Use Browser Use to open the printed URL against a local fixture page with click, type, wheel, drag, URL, console, and state counters. Verify click, type, wheel, drag, focus/text handling, WebSocket command acceptance, desktop layout, and mobile layout through the viewer UI. Browser Use is a required gate for this task.
 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add cli/assets/viewer.html cli/src/daemon/view/viewer_html.rs
+git add cli/assets/viewer.html cli/assets/viewer-coordinate.test.mjs cli/src/daemon/view/viewer_html.rs
 git commit -m "feat: add interactive viewer controls"
 ```
 
@@ -1724,7 +1830,7 @@ mod tests {
     #[test]
     fn store_creates_and_lists_annotation() {
         let mut store = AnnotationStore::new();
-        let annotation = AnnotationV1::minimal_for_tests("ann_1", "Make this primary");
+        let annotation = minimal_annotation_for_tests("ann_1", "Make this primary");
         let saved = store.create(annotation).expect("saved");
         assert_eq!(saved.annotation_id, "ann_1");
         assert_eq!(store.list().len(), 1);
@@ -1747,9 +1853,9 @@ cargo test -p gsd-browser annotations::tests -- --nocapture
 
 Expected: FAIL with unresolved store or test constructor.
 
-- [ ] **Step 3: Add annotation helpers in common**
+- [ ] **Step 3: Add annotation types in common**
 
-Add `AnnotationStatus` and `AnnotationV1::minimal_for_tests` behind `#[cfg(test)]` in `common/src/viewer.rs`:
+Add production `AnnotationStatus` to `common/src/viewer.rs` and keep `AnnotationV1` as a production protocol type:
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1763,36 +1869,9 @@ pub enum AnnotationStatus {
     Partial,
 }
 
-#[cfg(test)]
-impl AnnotationV1 {
-    pub fn minimal_for_tests(id: &str, note: &str) -> Self {
-        Self {
-            schema: ANNOTATION_SCHEMA.to_string(),
-            annotation_id: id.to_string(),
-            session_id: "sess".to_string(),
-            viewer_id: "view".to_string(),
-            page_id: Some(1),
-            target_id: None,
-            frame_id: Some("main".to_string()),
-            frame_seq: 1,
-            kind: "region".to_string(),
-            status: AnnotationStatus::Open,
-            note: note.to_string(),
-            url: "http://127.0.0.1".to_string(),
-            title: "Fixture".to_string(),
-            origin: "http://127.0.0.1".to_string(),
-            created_by: "user".to_string(),
-            created_at_ms: 1,
-            viewport: serde_json::json!({"width": 800, "height": 600, "scrollX": 0, "scrollY": 0}),
-            selection: serde_json::json!({"coordinateSpace": "viewport_css", "box": {"x": 1, "y": 2, "w": 3, "h": 4}}),
-            target: None,
-            artifact_refs: serde_json::json!({}),
-            partial_reasons: vec![],
-            redactions: vec![],
-        }
-    }
-}
 ```
+
+Define `minimal_annotation_for_tests` inside `cli/src/daemon/view/annotations.rs` test module. Do not rely on `#[cfg(test)]` helpers from `gsd-browser-common`; downstream crates compile dependencies without that cfg.
 
 - [ ] **Step 4: Implement store**
 
@@ -1809,6 +1888,7 @@ impl AnnotationStore {
     }
 
     pub fn create(&mut self, annotation: AnnotationV1) -> Result<AnnotationV1, String> {
+        let annotation = crate::daemon::view::privacy::redact_annotation(annotation);
         if self.entries.iter().any(|entry| entry.annotation_id == annotation.annotation_id) {
             return Err(format!("annotation already exists: {}", annotation.annotation_id));
         }
@@ -1865,6 +1945,7 @@ In `cli/assets/viewer.html`, add an annotation overlay div over the frame. In an
 - note text is required for save
 - pointer events do not call `sendViewerCommand("input", ...)`
 - `Escape` cancels draft annotation
+- sensitive mode saves only geometry, adds `partialReasons: ["sensitive_redacted"]`, and omits crop/full-frame artifacts
 
 - [ ] **Step 7: Run tests and build**
 
@@ -1877,13 +1958,13 @@ Expected: PASS.
 
 - [ ] **Step 8: Verify zero forwarded actions**
 
-Open the viewer, enter annotate mode, click and drag over a button, then run:
+Open the viewer with Browser Use, enter annotate mode, click and drag over a fixture button with a DOM click counter, then run:
 
 ```bash
 cargo run -p gsd-browser -- timeline
 ```
 
-Expected: annotation events exist and no page click action is added by annotate gestures.
+Expected: annotation events exist, the fixture click counter stays `0`, and no `input.pointer` event is recorded for annotate gestures.
 
 - [ ] **Step 9: Commit**
 
@@ -2031,10 +2112,29 @@ Add CLI commands:
 - `recording-get <id>`
 - `recording-export <id> --output <path>`
 - `recording-discard <id>`
+- `recording-validate <id|path> --json`
 
 Add viewer HUD controls for Record, Pause, Resume, Stop, Discard, and Export.
 
-- [ ] **Step 8: Run tests and build**
+- [ ] **Step 8: Add recording privacy matrix and validator**
+
+Default recording capture policy:
+
+- cookies: excluded
+- localStorage/sessionStorage: excluded
+- request bodies: excluded
+- response bodies: excluded
+- authorization headers: excluded
+- set-cookie headers: excluded
+- raw request/response payloads: excluded
+- full URLs: query params redacted before write
+- DOM snapshots: redacted through `PrivacyGuard`
+- screenshots and crops: omitted during sensitive mode
+- annotation exports: redacted through `PrivacyGuard`
+
+Implement `recording-validate <id|path> --json`. The validator checks schema, hashes, manifest presence, start/stop events, monotonic event sequence, referenced files, JSONL validity, redaction metadata, and unredacted token patterns.
+
+- [ ] **Step 9: Run tests and build**
 
 ```bash
 cargo test -p gsd-browser recording::tests -- --nocapture
@@ -2043,7 +2143,7 @@ cargo build --workspace
 
 Expected: PASS.
 
-- [ ] **Step 9: Verify artifact analyzer behavior**
+- [ ] **Step 10: Verify artifact analyzer behavior**
 
 Run:
 
@@ -2052,11 +2152,16 @@ cargo run -p gsd-browser -- record-start --name checkout-bug
 cargo run -p gsd-browser -- navigate https://example.com
 cargo run -p gsd-browser -- record-stop
 cargo run -p gsd-browser -- recordings --json
+cargo run -p gsd-browser -- recording-validate <recording-id> --json
 ```
 
-Expected: a recording id exists, manifest contains start/stop sequence, `events.jsonl` exists, redaction count exists.
+Expected: a recording id exists, manifest contains start/stop sequence, `events.jsonl` exists, redaction count exists, and `recording-validate` passes.
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 11: Verify automatic capture**
+
+Run a local fixture that triggers navigation, console error, failed request, dialog, annotation, and sensitive interval while recording. Assert `events.jsonl`, `frames/`, `snapshots/`, logs, manifest counts, redaction counts, and boundary hashes all reflect those actions.
+
+- [ ] **Step 12: Commit**
 
 ```bash
 git add cli/Cargo.toml cli/src/daemon/view/recording.rs cli/src/daemon/state.rs cli/src/daemon/view/http.rs cli/src/daemon/view/ws.rs cli/src/daemon/handlers/session.rs cli/src/main.rs cli/assets/viewer.html
@@ -2135,7 +2240,11 @@ Implement categories:
 
 Use string matching on role/name/text/url/origin with lowercased inputs. Return `ApprovalRequestV1` when `requires_approval` is true.
 
-- [ ] **Step 4: Wire approval state**
+- [ ] **Step 4: Resolve target metadata**
+
+Before risk evaluation, resolve pointer target metadata from current refs, accessibility, or DOM at the viewport coordinate. Populate `RiskInput` with role, name, text, form context, origin, URL, and input kind. URL/navigation/text risk runs even when target metadata is unavailable.
+
+- [ ] **Step 5: Wire approval state**
 
 Extend `SharedControlStore` with:
 
@@ -2144,13 +2253,13 @@ Extend `SharedControlStore` with:
 - `deny`
 - `expire_approval`
 
-In `ws.rs`, evaluate risk after control authorization and before dispatch. If approval is required, send an approval request to the viewer and do not dispatch input.
+Move risk evaluation into the shared page-effect authorization function used by viewer WebSocket, HTTP `/input`, cloud input, CLI page actions, navigation, file/download commands, and recording/export actions. If approval is required, store the exact pending command hash, send an approval request to the viewer, and do not dispatch input. Approval dispatches only the command whose hash matches the pending approval.
 
-- [ ] **Step 5: Add approval UI**
+- [ ] **Step 6: Add approval UI**
 
 In `cli/assets/viewer.html`, render approval banner with action summary, origin, element label, Approve, Deny, and countdown. Approval and denial send `ControlCommandV1`.
 
-- [ ] **Step 6: Run tests and build**
+- [ ] **Step 7: Run tests and build**
 
 ```bash
 cargo test -p gsd-browser risk::tests -- --nocapture
@@ -2160,7 +2269,7 @@ cargo build --workspace
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add cli/src/daemon/view/risk.rs cli/src/daemon/view/control.rs cli/src/daemon/view/ws.rs cli/assets/viewer.html
@@ -2177,6 +2286,7 @@ git commit -m "feat: add viewer risk approvals"
 - [ ] **Step 1: Run unit and build gates**
 
 ```bash
+node cli/assets/viewer-coordinate.test.mjs
 cargo test --workspace
 cargo build --workspace
 ```
@@ -2196,7 +2306,7 @@ Expected: daemon healthy, navigation succeeds, snapshot returns refs, printed vi
 
 - [ ] **Step 3: Run interactive local verification**
 
-Use Browser Use to open the printed URL and verify:
+Use Browser Use to open the printed URL against the local fixture and verify:
 
 - viewer displays the real Chrome page stream
 - clicking in Control mode changes page state
@@ -2207,6 +2317,8 @@ Use Browser Use to open the printed URL and verify:
 - Record start/stop writes an artifact bundle
 - Sensitive mode blocks cloud frame capture and keeps local viewer usable
 - approval banner appears for destructive labels
+- agent-owned observe-only, user-takeover, paused, and stale-control states render and reject correctly
+- desktop and mobile viewport layouts keep controls usable
 
 - [ ] **Step 4: Verify artifact bundle**
 
@@ -2215,6 +2327,7 @@ cargo run -p gsd-browser -- record-start --name final-smoke
 cargo run -p gsd-browser -- navigate https://example.com
 cargo run -p gsd-browser -- record-stop
 cargo run -p gsd-browser -- recordings --json
+cargo run -p gsd-browser -- recording-validate <recording-id> --json
 ```
 
 Expected: exported manifest uses `BrowserArtifactBundleV1`, start/stop events exist inside `events.jsonl`, sensitive intervals contain redaction status.
@@ -2230,10 +2343,21 @@ Update `README.md` and `SKILL.md` with:
 - recording commands
 - privacy behavior and local-only artifact storage
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Update release/version surface**
+
+Update:
+
+- `cli/Cargo.toml` package version
+- `common/Cargo.toml` package version
+- `npm/package.json` package version
+- `common/src/cloud.rs` `CLOUD_TOOL_RUNTIME_MIN_VERSION`
+
+State release sequencing for GitHub release assets and the npm wrapper in the PR body.
+
+- [ ] **Step 7: Commit**
 
 ```bash
-git add README.md SKILL.md docs/superpowers/specs/2026-05-02-interactive-browser-workbench-design.md
+git add README.md SKILL.md cli/Cargo.toml common/Cargo.toml npm/package.json common/src/cloud.rs docs/superpowers/specs/2026-05-02-interactive-browser-workbench-design.md
 git commit -m "docs: document interactive browser workbench"
 ```
 
@@ -2255,5 +2379,5 @@ git commit -m "docs: document interactive browser workbench"
 - Commit after each task.
 - Keep protocol changes in `common` compatible with cloud input names.
 - Keep viewer HTML target-origin-free: no iframe, no proxy, no target script execution in the viewer.
-- Use Browser Use for manual UI verification when available.
+- Use Browser Use for final viewer UI verification.
 - Use `cargo test --workspace` and `cargo build --workspace` at the final gate.
