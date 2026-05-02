@@ -5,7 +5,7 @@ use axum::{
     extract::State,
     http::{HeaderMap, StatusCode, Uri},
     response::{Html, IntoResponse, Json, Response},
-    routing::get,
+    routing::{get, post},
     Router,
 };
 use serde::{Deserialize, Serialize};
@@ -141,11 +141,51 @@ async fn post_control(
     Ok(Json(ControlResponse { state: req.state }))
 }
 
+async fn post_input(
+    State(s): State<ViewState>,
+    uri: Uri,
+    headers: HeaderMap,
+    Json(value): Json<serde_json::Value>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    verify_viewer_token(&s, &uri, "input")?;
+    verify_origin(&s, &headers)?;
+    let command_id = crate::daemon::view::input::command_id_from_value(&value);
+    let cmd = crate::daemon::view::input::parse_viewer_command(value).map_err(|err| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("viewer command rejected: {:?}: {}", err.reason, err.message),
+        )
+    })?;
+    let value = match crate::daemon::view::input::handle_viewer_command(cmd, &s).await {
+        Ok(accepted) => serde_json::to_value(accepted).map_err(|err| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("failed to serialize accepted command: {err}"),
+            )
+        })?,
+        Err(rejected) => {
+            let rejected = if rejected.command_id.is_none() {
+                crate::daemon::view::input::rejected(command_id, rejected.reason, rejected.message)
+            } else {
+                rejected
+            };
+            serde_json::to_value(rejected).map_err(|err| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("failed to serialize rejected command: {err}"),
+                )
+            })?
+        }
+    };
+    Ok(Json(value))
+}
+
 pub fn router(state: ViewState) -> Router {
     Router::new()
         .route("/", get(root))
         .route("/health", get(health))
         .route("/control", get(get_control).post(post_control))
+        .route("/input", post(post_input))
         .route("/ws", get(crate::daemon::view::ws::ws_upgrade))
         .with_state(state)
 }

@@ -107,6 +107,56 @@ async fn handle_socket(mut socket: WebSocket, state: ViewState) {
             }
             msg = socket.recv() => {
                 match msg {
+                    Some(Ok(Message::Text(text))) => {
+                        let value = match serde_json::from_str::<serde_json::Value>(text.as_str()) {
+                            Ok(value) => value,
+                            Err(err) => {
+                                let rejected = crate::daemon::view::input::rejected(
+                                    None,
+                                    gsd_browser_common::viewer::ViewerRejectionReason::MalformedCommand,
+                                    err.to_string(),
+                                );
+                                if let Ok(json) = serde_json::to_string(&rejected) {
+                                    let _ = socket.send(Message::Text(json.into())).await;
+                                }
+                                continue;
+                            }
+                        };
+                        let command_id = crate::daemon::view::input::command_id_from_value(&value);
+                        match crate::daemon::view::input::parse_viewer_command(value) {
+                            Ok(cmd) => {
+                                let response = match crate::daemon::view::input::handle_viewer_command(cmd, &state).await {
+                                    Ok(accepted) => serde_json::to_value(accepted),
+                                    Err(rejected) => serde_json::to_value(rejected),
+                                };
+                                if let Ok(value) = response {
+                                    if socket.send(Message::Text(value.to_string().into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                            Err(err) => {
+                                let rejected = crate::daemon::view::input::rejected(command_id, err.reason, err.message);
+                                if let Ok(json) = serde_json::to_string(&rejected) {
+                                    if socket.send(Message::Text(json.into())).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(Ok(Message::Binary(_))) => {
+                        let rejected = crate::daemon::view::input::rejected(
+                            None,
+                            gsd_browser_common::viewer::ViewerRejectionReason::MalformedCommand,
+                            "binary viewer commands are unsupported",
+                        );
+                        if let Ok(json) = serde_json::to_string(&rejected) {
+                            if socket.send(Message::Text(json.into())).await.is_err() {
+                                break;
+                            }
+                        }
+                    }
                     Some(Ok(_)) => {}
                     Some(Err(_)) | None => break,
                 }

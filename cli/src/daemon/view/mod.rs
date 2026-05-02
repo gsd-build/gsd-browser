@@ -2,6 +2,7 @@ pub mod auth;
 pub mod capture;
 pub mod control;
 pub mod http;
+pub mod input;
 pub mod refs_poller;
 pub mod target_follow;
 pub mod viewer_html;
