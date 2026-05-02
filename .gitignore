@@ -30,3 +30,4 @@ tmp/
 .worktrees/
 .rewrite-backups/
 assets/gsd-browser-banner.*
+spikes/
