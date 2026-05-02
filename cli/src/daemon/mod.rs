@@ -1,6 +1,7 @@
 pub mod capture;
 pub mod handlers;
 pub mod helpers;
+pub mod input_dispatch;
 pub mod inspection;
 pub mod logs;
 pub mod narration;
