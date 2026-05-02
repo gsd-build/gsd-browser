@@ -22,31 +22,85 @@ pub async fn handle_goal(state: &DaemonState, params: &Value) -> Result<Value, S
 
 pub async fn handle_pause(state: &DaemonState) -> Result<Value, String> {
     state.narrator.set_control(ControlState::Paused).await;
-    Ok(json!({"control": "paused"}))
+    let control = state.view_control.lock().await.pause("paused by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
 }
 
 pub async fn handle_resume(state: &DaemonState) -> Result<Value, String> {
     state.narrator.set_control(ControlState::Running).await;
-    Ok(json!({"control": "running"}))
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .release("resumed by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
 }
 
 pub async fn handle_step(state: &DaemonState) -> Result<Value, String> {
     state.narrator.set_control(ControlState::Step).await;
-    Ok(json!({"control": "step"}))
+    let control = state.view_control.lock().await.step("step by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
 }
 
 pub async fn handle_abort(state: &DaemonState) -> Result<Value, String> {
     state.narrator.set_control(ControlState::Aborted).await;
-    Ok(json!({"control": "aborted"}))
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .abort("aborted by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
 }
 
 pub async fn handle_view_status(state: &DaemonState) -> Result<Value, String> {
     let goal = state.narrator.current_goal().await;
-    let control = state.narrator.control.get().await;
+    let control = state.view_control.lock().await.snapshot();
     Ok(json!({
         "goal": goal,
         "control": control,
     }))
+}
+
+pub async fn handle_control_state(state: &DaemonState) -> Result<Value, String> {
+    let control = state.view_control.lock().await.snapshot();
+    serde_json::to_value(control).map_err(|err| err.to_string())
+}
+
+pub async fn handle_takeover(state: &DaemonState) -> Result<Value, String> {
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .takeover("takeover by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
+}
+
+pub async fn handle_release_control(state: &DaemonState) -> Result<Value, String> {
+    state.narrator.set_control(ControlState::Running).await;
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .release("released by command")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
+}
+
+pub async fn handle_sensitive_on(state: &DaemonState) -> Result<Value, String> {
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .sensitive_on("sensitive mode enabled")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
+}
+
+pub async fn handle_sensitive_off(state: &DaemonState) -> Result<Value, String> {
+    let control = state
+        .view_control
+        .lock()
+        .await
+        .sensitive_off("sensitive mode disabled")?;
+    serde_json::to_value(control).map_err(|err| err.to_string())
 }
 
 pub async fn handle_view(

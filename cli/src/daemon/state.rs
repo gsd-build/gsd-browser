@@ -236,6 +236,7 @@ pub struct DaemonState {
     pub trace_state: Mutex<TraceState>,
     pub narrator: Arc<crate::daemon::narration::Narrator>,
     pub view_server: tokio::sync::Mutex<Option<crate::daemon::view::ViewServerHandle>>,
+    pub view_control: tokio::sync::Mutex<crate::daemon::view::control::SharedControlStore>,
 }
 
 impl DaemonState {
@@ -262,6 +263,9 @@ impl DaemonState {
             trace_state: Mutex::new(TraceState::new()),
             narrator: crate::daemon::narration::Narrator::new(no_narration_delay),
             view_server: tokio::sync::Mutex::new(None),
+            view_control: tokio::sync::Mutex::new(
+                crate::daemon::view::control::SharedControlStore::new(),
+            ),
         }
     }
 }

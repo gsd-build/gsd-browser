@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod capture;
+pub mod control;
 pub mod http;
 pub mod refs_poller;
 pub mod target_follow;

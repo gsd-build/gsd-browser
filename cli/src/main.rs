@@ -420,6 +420,16 @@ enum Commands {
     Step,
     /// Abort the next action
     Abort,
+    /// Show shared control state
+    ControlState,
+    /// Let the viewer user control page input
+    Takeover,
+    /// Return page input ownership to the agent
+    ReleaseControl,
+    /// Enable sensitive local-only control mode
+    SensitiveOn,
+    /// Disable sensitive local-only control mode
+    SensitiveOff,
     /// Open the live viewer for this session
     View {
         /// Print the URL without opening it
@@ -428,6 +438,9 @@ enum Commands {
         /// Open the history-focused viewer
         #[arg(long)]
         history: bool,
+        /// Explicitly request the default interactive viewer
+        #[arg(long)]
+        interactive: bool,
     },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
@@ -887,9 +900,15 @@ async fn main() {
         Commands::Resume => cmd_control(&cli, "resume").await,
         Commands::Step => cmd_control(&cli, "step").await,
         Commands::Abort => cmd_control(&cli, "abort").await,
+        Commands::ControlState => cmd_control(&cli, "control_state").await,
+        Commands::Takeover => cmd_control(&cli, "takeover").await,
+        Commands::ReleaseControl => cmd_control(&cli, "release_control").await,
+        Commands::SensitiveOn => cmd_control(&cli, "sensitive_on").await,
+        Commands::SensitiveOff => cmd_control(&cli, "sensitive_off").await,
         Commands::View {
             print_only,
             history,
+            interactive: _,
         } => cmd_view(&cli, *print_only, *history).await,
         Commands::SessionSummary => cmd_session_summary(&cli).await,
         Commands::DebugBundle { name } => cmd_debug_bundle(&cli, name.as_deref()).await,
@@ -1898,7 +1917,8 @@ async fn cmd_view(cli: &Cli, print_only: bool, history: bool) -> CmdResult {
         .and_then(|value| value.as_str())
         .ok_or("view response missing url")?;
     let url = if history {
-        format!("{base_url}?history=1")
+        let sep = if base_url.contains('?') { "&" } else { "?" };
+        format!("{base_url}{sep}history=1")
     } else {
         base_url.to_string()
     };
