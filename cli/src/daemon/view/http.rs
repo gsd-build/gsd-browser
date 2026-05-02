@@ -97,15 +97,19 @@ pub fn verify_origin(state: &ViewState, headers: &HeaderMap) -> Result<(), (Stat
 }
 
 fn viewer_html_response() -> Response {
-    let mut response = Html(viewer_html()).into_response();
+    let nonce = uuid::Uuid::new_v4().to_string();
+    let html = viewer_html().replace("__GSD_VIEWER_NONCE__", &nonce);
+    let mut response = Html(html).into_response();
     let headers = response.headers_mut();
     headers.insert("Referrer-Policy", "no-referrer".parse().expect("header"));
     headers.insert("Cache-Control", "no-store".parse().expect("header"));
     headers.insert(
         "Content-Security-Policy",
-        "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'"
-            .parse()
-            .expect("header"),
+        format!(
+            "default-src 'self'; script-src 'nonce-{nonce}'; style-src 'nonce-{nonce}'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'"
+        )
+        .parse()
+        .expect("header"),
     );
     response
 }
