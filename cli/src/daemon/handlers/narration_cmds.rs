@@ -199,3 +199,114 @@ pub async fn handle_annotation_request(
         .ok_or("annotation_request requires note")?;
     Ok(json!({ "pending": true, "note": note }))
 }
+
+pub async fn handle_record_start(state: &DaemonState, params: &Value) -> Result<Value, String> {
+    let name = params
+        .get("name")
+        .and_then(Value::as_str)
+        .unwrap_or("recording");
+    let mut store = state.recordings.lock().await;
+    let session = store.start(name)?;
+    store.record_event(crate::daemon::view::recording::RecordingEventInput {
+        source: "cli".to_string(),
+        owner: "agent".to_string(),
+        kind: "recording.start".to_string(),
+        url: String::new(),
+        title: name.to_string(),
+        redacted: false,
+    })?;
+    serde_json::to_value(session).map_err(|err| err.to_string())
+}
+
+pub async fn handle_record_stop(state: &DaemonState) -> Result<Value, String> {
+    let mut store = state.recordings.lock().await;
+    let id = store.active_id().ok_or("no active recording")?;
+    store.record_event(crate::daemon::view::recording::RecordingEventInput {
+        source: "cli".to_string(),
+        owner: "agent".to_string(),
+        kind: "recording.stop".to_string(),
+        url: String::new(),
+        title: String::new(),
+        redacted: false,
+    })?;
+    let manifest = store.stop(&id)?;
+    serde_json::to_value(manifest).map_err(|err| err.to_string())
+}
+
+pub async fn handle_record_pause(state: &DaemonState) -> Result<Value, String> {
+    let mut store = state.recordings.lock().await;
+    let id = store.active_id().ok_or("no active recording")?;
+    let session = store.pause(&id)?;
+    serde_json::to_value(session).map_err(|err| err.to_string())
+}
+
+pub async fn handle_record_resume(state: &DaemonState) -> Result<Value, String> {
+    let mut store = state.recordings.lock().await;
+    let id = store.active_id().ok_or("no active recording")?;
+    let session = store.resume(&id)?;
+    serde_json::to_value(session).map_err(|err| err.to_string())
+}
+
+pub async fn handle_recordings(state: &DaemonState) -> Result<Value, String> {
+    let recordings = state.recordings.lock().await.list();
+    Ok(json!({ "recordings": recordings }))
+}
+
+pub async fn handle_recording_get(state: &DaemonState, params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("recording_get requires id")?;
+    let manifest = state
+        .recordings
+        .lock()
+        .await
+        .get(id)
+        .ok_or_else(|| format!("recording not found: {id}"))?;
+    serde_json::to_value(manifest).map_err(|err| err.to_string())
+}
+
+pub async fn handle_recording_discard(
+    state: &DaemonState,
+    params: &Value,
+) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("recording_discard requires id")?;
+    let discarded = state.recordings.lock().await.discard(id)?;
+    Ok(json!({ "discarded": discarded, "id": id }))
+}
+
+pub async fn handle_recording_export(state: &DaemonState, params: &Value) -> Result<Value, String> {
+    let id = params
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or("recording_export requires id")?;
+    let output = params
+        .get("output")
+        .and_then(Value::as_str)
+        .ok_or("recording_export requires output")?;
+    let path = state
+        .recordings
+        .lock()
+        .await
+        .export(id, std::path::Path::new(output))?;
+    Ok(json!({ "path": path }))
+}
+
+pub async fn handle_recording_validate(params: &Value) -> Result<Value, String> {
+    let path = params
+        .get("path")
+        .and_then(Value::as_str)
+        .ok_or("recording_validate requires path")?;
+    let supplied = std::path::Path::new(path);
+    let resolved = if supplied.exists() {
+        supplied.to_path_buf()
+    } else {
+        gsd_browser_common::state_dir()
+            .join("recordings")
+            .join(path)
+    };
+    crate::daemon::view::recording::validate_recording_bundle(&resolved)
+}

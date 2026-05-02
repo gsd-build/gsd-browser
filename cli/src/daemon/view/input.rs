@@ -132,6 +132,16 @@ async fn apply_sensitive_command(
     }
 }
 
+async fn page_metadata(page: &chromiumoxide::Page) -> (String, String) {
+    let url = page.url().await.unwrap_or_default().unwrap_or_default();
+    let title = page
+        .get_title()
+        .await
+        .unwrap_or_default()
+        .unwrap_or_default();
+    (url, title)
+}
+
 pub async fn handle_viewer_command(
     cmd: ViewerCommandV1,
     state: &crate::daemon::view::http::ViewState,
@@ -169,6 +179,16 @@ pub async fn handle_viewer_command(
                         message,
                     )
                 })?;
+            let (url, title) = page_metadata(&page).await;
+            let mut recordings = state.daemon_state.recordings.lock().await;
+            let _ = recordings.record_event(crate::daemon::view::recording::RecordingEventInput {
+                source: "viewer".to_string(),
+                owner: "user".to_string(),
+                kind: format!("{:?}", input.kind).to_lowercase(),
+                url,
+                title,
+                redacted: false,
+            });
             Ok(accepted(
                 cmd.command_id,
                 control.control_version,
@@ -234,7 +254,82 @@ pub async fn handle_viewer_command(
                 control.frame_seq,
             ))
         }
-        ViewerCommandPayload::Recording(_) => {
+        ViewerCommandPayload::Recording(command) => {
+            let mut store = state.daemon_state.recordings.lock().await;
+            match command.action.as_str() {
+                "start" => {
+                    store
+                        .start(command.name.as_deref().unwrap_or("viewer-flow"))
+                        .map_err(|message| {
+                            rejected(
+                                Some(cmd.command_id.clone()),
+                                ViewerRejectionReason::MalformedCommand,
+                                message,
+                            )
+                        })?;
+                    store
+                        .record_event(crate::daemon::view::recording::RecordingEventInput {
+                            source: "viewer".to_string(),
+                            owner: "user".to_string(),
+                            kind: "recording.start".to_string(),
+                            url: String::new(),
+                            title: command.name.unwrap_or_else(|| "viewer-flow".to_string()),
+                            redacted: false,
+                        })
+                        .map_err(|message| {
+                            rejected(
+                                Some(cmd.command_id.clone()),
+                                ViewerRejectionReason::MalformedCommand,
+                                message,
+                            )
+                        })?;
+                }
+                "stop" => {
+                    if let Some(id) = store.active_id() {
+                        store
+                            .record_event(crate::daemon::view::recording::RecordingEventInput {
+                                source: "viewer".to_string(),
+                                owner: "user".to_string(),
+                                kind: "recording.stop".to_string(),
+                                url: String::new(),
+                                title: String::new(),
+                                redacted: false,
+                            })
+                            .map_err(|message| {
+                                rejected(
+                                    Some(cmd.command_id.clone()),
+                                    ViewerRejectionReason::MalformedCommand,
+                                    message,
+                                )
+                            })?;
+                        store.stop(&id).map_err(|message| {
+                            rejected(
+                                Some(cmd.command_id.clone()),
+                                ViewerRejectionReason::MalformedCommand,
+                                message,
+                            )
+                        })?;
+                    }
+                }
+                "pause" => {
+                    if let Some(id) = store.active_id() {
+                        let _ = store.pause(&id);
+                    }
+                }
+                "resume" => {
+                    if let Some(id) = store.active_id() {
+                        let _ = store.resume(&id);
+                    }
+                }
+                "discard" => {
+                    let id = command.recording_id.clone().or_else(|| store.active_id());
+                    if let Some(id) = id {
+                        let _ = store.discard(&id);
+                    }
+                }
+                _ => {}
+            }
+            drop(store);
             let control = state.daemon_state.view_control.lock().await.snapshot();
             Ok(accepted(
                 cmd.command_id,

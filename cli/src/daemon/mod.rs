@@ -674,6 +674,20 @@ async fn dispatch(
         let _ = handlers::session::sync_session_manifest(page, state, None, None).await;
     }
 
+    if record_timeline {
+        let title = bounded_page_title(page).await;
+        let url = bounded_page_url(page).await;
+        let mut recordings = state.recordings.lock().await;
+        let _ = recordings.record_event(view::recording::RecordingEventInput {
+            source: "cli".to_string(),
+            owner: "agent".to_string(),
+            kind: req.method.clone(),
+            url,
+            title,
+            redacted: false,
+        });
+    }
+
     response
 }
 
@@ -687,6 +701,21 @@ async fn bounded_page_url(page: &Page) -> String {
         }
         Err(_) => {
             warn!("[gsd-browser-daemon] page url timed out");
+            String::new()
+        }
+    }
+}
+
+async fn bounded_page_title(page: &Page) -> String {
+    match timeout(PAGE_URL_TIMEOUT, page.get_title()).await {
+        Ok(Ok(Some(title))) => title,
+        Ok(Ok(None)) => String::new(),
+        Ok(Err(err)) => {
+            warn!("[gsd-browser-daemon] page title error: {err}");
+            String::new()
+        }
+        Err(_) => {
+            warn!("[gsd-browser-daemon] page title timed out");
             String::new()
         }
     }
@@ -864,6 +893,52 @@ pub(crate) async fn dispatch_inner(
         }
         "annotation_request" => {
             match handlers::narration_cmds::handle_annotation_request(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "record_start" => {
+            match handlers::narration_cmds::handle_record_start(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "record_stop" => match handlers::narration_cmds::handle_record_stop(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "record_pause" => match handlers::narration_cmds::handle_record_pause(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "record_resume" => match handlers::narration_cmds::handle_record_resume(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "recordings" => match handlers::narration_cmds::handle_recordings(state).await {
+            Ok(result) => DaemonResponse::success(req.id, result),
+            Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+        },
+        "recording_get" => {
+            match handlers::narration_cmds::handle_recording_get(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "recording_export" => {
+            match handlers::narration_cmds::handle_recording_export(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "recording_discard" => {
+            match handlers::narration_cmds::handle_recording_discard(state, &req.params).await {
+                Ok(result) => DaemonResponse::success(req.id, result),
+                Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
+            }
+        }
+        "recording_validate" => {
+            match handlers::narration_cmds::handle_recording_validate(&req.params).await {
                 Ok(result) => DaemonResponse::success(req.id, result),
                 Err(msg) => DaemonResponse::error(req.id, ERR_INTERNAL, msg),
             }

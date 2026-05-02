@@ -461,6 +461,35 @@ enum Commands {
     },
     /// Ask the viewer user for an annotation
     AnnotationRequest { note: String },
+    /// Start a flow recording
+    RecordStart {
+        #[arg(long)]
+        name: String,
+    },
+    /// Stop the active flow recording
+    RecordStop,
+    /// Pause the active flow recording
+    RecordPause,
+    /// Resume the active flow recording
+    RecordResume,
+    /// List flow recordings
+    Recordings,
+    /// Get a flow recording manifest
+    RecordingGet { id: String },
+    /// Export a flow recording
+    RecordingExport {
+        id: String,
+        #[arg(long)]
+        output: String,
+    },
+    /// Discard a flow recording
+    RecordingDiscard { id: String },
+    /// Validate a flow recording bundle path
+    RecordingValidate {
+        path: String,
+        #[arg(long)]
+        json: bool,
+    },
     /// Get a diagnostic summary of the current browser session
     SessionSummary,
     /// Capture a debug bundle (screenshot, logs, timeline, accessibility tree)
@@ -957,6 +986,37 @@ async fn main() {
                 &cli,
                 "annotation_request",
                 serde_json::json!({ "note": note }),
+            )
+            .await
+        }
+        Commands::RecordStart { name } => {
+            cmd_json_method(&cli, "record_start", serde_json::json!({ "name": name })).await
+        }
+        Commands::RecordStop => cmd_json_method(&cli, "record_stop", serde_json::json!({})).await,
+        Commands::RecordPause => cmd_json_method(&cli, "record_pause", serde_json::json!({})).await,
+        Commands::RecordResume => {
+            cmd_json_method(&cli, "record_resume", serde_json::json!({})).await
+        }
+        Commands::Recordings => cmd_json_method(&cli, "recordings", serde_json::json!({})).await,
+        Commands::RecordingGet { id } => {
+            cmd_json_method(&cli, "recording_get", serde_json::json!({ "id": id })).await
+        }
+        Commands::RecordingExport { id, output } => {
+            cmd_json_method(
+                &cli,
+                "recording_export",
+                serde_json::json!({ "id": id, "output": output }),
+            )
+            .await
+        }
+        Commands::RecordingDiscard { id } => {
+            cmd_json_method(&cli, "recording_discard", serde_json::json!({ "id": id })).await
+        }
+        Commands::RecordingValidate { path, json: _ } => {
+            cmd_json_method(
+                &cli,
+                "recording_validate",
+                serde_json::json!({ "path": path }),
             )
             .await
         }
