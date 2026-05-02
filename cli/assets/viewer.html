@@ -87,6 +87,49 @@
     padding: 1px 5px;
     border-radius: 4px;
   }
+  #approval {
+    position: fixed;
+    top: 12px; left: 12px;
+    z-index: 11;
+    display: none;
+    width: min(420px, calc(100vw - 24px));
+    background: rgba(26, 22, 18, 0.94);
+    border: 1px solid rgba(255, 190, 110, 0.38);
+    box-shadow: 0 10px 40px rgba(0,0,0,0.35);
+    padding: 10px;
+    border-radius: 8px;
+  }
+  #approval.show {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 8px;
+    align-items: center;
+  }
+  #approval-summary {
+    font-size: 13px;
+    line-height: 1.25;
+    color: #ffe1b8;
+    overflow-wrap: anywhere;
+  }
+  #approval-origin {
+    display: block;
+    margin-top: 2px;
+    color: #b8aaa0;
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 11px;
+  }
+  .approval-btn {
+    border: 1px solid rgba(255,255,255,0.16);
+    color: #f3f0eb;
+    background: rgba(255,255,255,0.08);
+    border-radius: 7px;
+    padding: 7px 10px;
+    cursor: pointer;
+  }
+  .approval-btn.primary {
+    background: rgba(255, 190, 110, 0.22);
+    border-color: rgba(255, 190, 110, 0.48);
+  }
 
   /* History rail */
   #history {
@@ -336,6 +379,11 @@
 <div id="goal"></div>
 <div id="history"></div>
 <img id="hist-preview" alt="">
+<div id="approval">
+  <div id="approval-summary"></div>
+  <button id="approval-approve" class="approval-btn primary">Approve</button>
+  <button id="approval-deny" class="approval-btn">Deny</button>
+</div>
 <div id="controls">
   <button id="btn-control" class="ctrl-btn">Control</button>
   <button id="btn-annotate" class="ctrl-btn">Annotate</button>
@@ -370,6 +418,7 @@ const viewerState = {
   mode: "observe",
   recording: false,
   sensitive: false,
+  approval: null,
   latestFrame: null,
   commandSeq: 1
 };
@@ -515,6 +564,8 @@ function handleEvent(evt) {
   if (evt.type === 'snapshot') {
     setGoal(evt.goal);
     applyControlState(evt.control || 'running');
+    if (evt.sharedControl) applyControlState(evt.sharedControl);
+    renderApproval(evt.approval || null);
     for (const item of evt.history || []) handleEvent(item);
     return;
   }
@@ -534,6 +585,13 @@ function handleEvent(evt) {
   }
   if (evt.type === 'commandRejected') {
     setStatus(`rejected · ${evt.reason}: ${evt.message}`);
+    if (evt.reason === 'approval_required') {
+      renderApproval({
+        summary: 'Approval required',
+        origin: location.host,
+        expiresAtMs: Date.now() + 30000
+      });
+    }
     return;
   }
   if (evt.controlVersion) viewerState.controlVersion = evt.controlVersion;
@@ -571,6 +629,7 @@ function handleEvent(evt) {
   }
   if (evt.type === 'control') {
     applyControlState(evt.state);
+    renderApproval(evt.approval || null);
     return;
   }
   if (evt.type === 'goal') {
@@ -696,6 +755,10 @@ const btnRecord = document.getElementById('btn-record');
 const btnSensitive = document.getElementById('btn-sensitive');
 const btnResume = document.getElementById('btn-resume');
 const textProxy = document.getElementById('text-proxy');
+const approvalEl = document.getElementById('approval');
+const approvalSummary = document.getElementById('approval-summary');
+const btnApprovalApprove = document.getElementById('approval-approve');
+const btnApprovalDeny = document.getElementById('approval-deny');
 
 function sendControlAction(action, reason) {
   sendViewerCommand("control", {
@@ -713,6 +776,24 @@ function sendSensitive(enabled) {
     reason: enabled ? "viewer sensitive mode" : "viewer sensitive mode off"
   });
   renderModeButtons();
+}
+
+function renderApproval(approval) {
+  viewerState.approval = approval;
+  if (!approval) {
+    approvalEl.classList.remove('show');
+    approvalSummary.textContent = '';
+    return;
+  }
+  const seconds = Math.max(0, Math.ceil(((approval.expiresAtMs || Date.now()) - Date.now()) / 1000));
+  approvalSummary.innerHTML = `${escapeHtml(approval.summary || 'Approval required')} <span id="approval-origin">${escapeHtml(approval.origin || '')} · ${seconds}s</span>`;
+  approvalEl.classList.add('show');
+}
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[ch]);
 }
 
 function renderModeButtons() {
@@ -880,6 +961,14 @@ btnResume.addEventListener('click', () => {
   renderModeButtons();
 });
 btnAbort.addEventListener('click', () => sendControlAction('abort'));
+btnApprovalApprove.addEventListener('click', () => {
+  sendControlAction('approve', 'viewer approved risk gate');
+  renderApproval(null);
+});
+btnApprovalDeny.addEventListener('click', () => {
+  sendControlAction('deny', 'viewer denied risk gate');
+  renderApproval(null);
+});
 
 function applyControlState(state) {
   if (typeof state === 'string') {

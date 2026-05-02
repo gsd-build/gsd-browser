@@ -93,6 +93,8 @@ fn map_control_rejection(message: String) -> ViewerRejectionReason {
         ViewerRejectionReason::AnnotationModeBlocksPageInput
     } else if message.contains("SensitivePrivacyMode") {
         ViewerRejectionReason::SensitivePrivacyMode
+    } else if message.contains("ApprovalRequired") {
+        ViewerRejectionReason::ApprovalRequired
     } else {
         ViewerRejectionReason::MalformedCommand
     }
@@ -112,6 +114,8 @@ async fn apply_control_command(
         "pause" => store.pause(reason),
         "step" => store.step(reason),
         "annotate" | "annotating" => store.annotate(reason),
+        "approve" => store.approve(reason),
+        "deny" => store.deny(reason),
         "abort" => store.abort(reason),
         other => Err(format!("unsupported control action: {other}")),
     }
@@ -206,6 +210,30 @@ pub async fn handle_viewer_command(
                         message,
                     )
                 })?;
+            let approved_input = if command.action == "approve" {
+                store.take_approved_input()
+            } else {
+                None
+            };
+            drop(store);
+            if let Some(mut input) = approved_input {
+                input.control_version = control.control_version;
+                input.frame_seq = control.frame_seq;
+                let page = state.active_page_rx.borrow().clone();
+                crate::daemon::input_dispatch::dispatch_user_input(
+                    &page,
+                    &state.daemon_state,
+                    &input,
+                )
+                .await
+                .map_err(|message| {
+                    rejected(
+                        Some(cmd.command_id.clone()),
+                        ViewerRejectionReason::MalformedCommand,
+                        message,
+                    )
+                })?;
+            }
             Ok(accepted(
                 cmd.command_id,
                 control.control_version,

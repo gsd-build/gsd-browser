@@ -8,6 +8,7 @@ pub mod page_state;
 pub mod privacy;
 pub mod recording;
 pub mod refs_poller;
+pub mod risk;
 pub mod target_follow;
 pub mod viewer_html;
 pub mod ws;

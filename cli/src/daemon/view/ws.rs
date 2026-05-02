@@ -18,6 +18,8 @@ struct SnapshotMsg<'a> {
     ty: &'a str,
     goal: Option<String>,
     control: ControlState,
+    shared_control: gsd_browser_common::viewer::SharedControlStateV1,
+    approval: Option<gsd_browser_common::viewer::ApprovalRequestV1>,
     history: Vec<NarrationEvent>,
     timestamp: u64,
 }
@@ -48,11 +50,17 @@ pub async fn ws_upgrade(
 async fn handle_socket(mut socket: WebSocket, state: ViewState) {
     let goal = state.narrator.current_goal().await;
     let control = state.narrator.control.get().await;
+    let (shared_control, approval) = {
+        let store = state.daemon_state.view_control.lock().await;
+        (store.snapshot(), store.pending_approval())
+    };
     let history = state.narrator.history.lock().await.recent(32);
     let snapshot = SnapshotMsg {
         ty: "snapshot",
         goal,
         control,
+        shared_control,
+        approval,
         history,
         timestamp: now_ms(),
     };
@@ -133,6 +141,18 @@ async fn handle_socket(mut socket: WebSocket, state: ViewState) {
                                     if socket.send(Message::Text(value.to_string().into())).await.is_err() {
                                         break;
                                     }
+                                }
+                                let (shared_control, approval) = {
+                                    let store = state.daemon_state.view_control.lock().await;
+                                    (store.snapshot(), store.pending_approval())
+                                };
+                                let control_event = serde_json::json!({
+                                    "type": "control",
+                                    "state": shared_control,
+                                    "approval": approval,
+                                });
+                                if socket.send(Message::Text(control_event.to_string().into())).await.is_err() {
+                                    break;
                                 }
                             }
                             Err(err) => {
