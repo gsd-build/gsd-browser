@@ -38,6 +38,10 @@ reqwest = { workspace = true }
 axum = { version = "0.7", features = ["ws"] }
 tower = "0.5"
 tower-http = { version = "0.6", features = ["cors"] }
+hmac = "0.12"
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 futures-util = "0.3"

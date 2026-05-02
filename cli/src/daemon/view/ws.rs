@@ -5,6 +5,7 @@ use axum::{
         ws::{Message, WebSocket, WebSocketUpgrade},
         State,
     },
+    http::{StatusCode, Uri},
     response::IntoResponse,
 };
 use serde::Serialize;
@@ -21,8 +22,27 @@ struct SnapshotMsg<'a> {
     timestamp: u64,
 }
 
-pub async fn ws_upgrade(ws: WebSocketUpgrade, State(state): State<ViewState>) -> impl IntoResponse {
+pub async fn ws_upgrade(
+    ws: WebSocketUpgrade,
+    State(state): State<ViewState>,
+    uri: Uri,
+) -> impl IntoResponse {
+    if let Err((status, message)) =
+        crate::daemon::view::http::verify_viewer_token(&state, &uri, "view")
+    {
+        return (status, message).into_response();
+    }
+    if let Some(host) = uri.host() {
+        if !crate::daemon::view::auth::is_loopback_host(host) {
+            return (
+                StatusCode::FORBIDDEN,
+                "viewer websocket requires loopback host".to_string(),
+            )
+                .into_response();
+        }
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
+        .into_response()
 }
 
 async fn handle_socket(mut socket: WebSocket, state: ViewState) {
