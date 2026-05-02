@@ -23,7 +23,7 @@ allowed-tools: Bash(gsd-browser:*), Bash(gsd-browser *)
 3. **Use `--json` when parsing output.** Use text mode when reading output yourself. Use `--json` when you need to extract values programmatically (e.g., checking assertion results, parsing snapshot refs).
 4. **Positional args have no flag prefix.** Commands like `click`, `type`, `hover` take positional args — do NOT add `--selector`. See exact syntax in command reference below.
 5. **Use `batch` for atomic multi-step flows.** Batch reduces round trips and keeps pass/fail checks in one call. Use separate commands when you need intermediate output (e.g., snapshot to discover refs).
-6. **Use `view` when the user wants to watch or direct the browser.** The live viewer is the shared screen and control surface; keep running actions through CLI commands.
+6. **Use `view` when the user wants to watch or direct the browser.** The live viewer is an authenticated local workbench with Control, Annotate, Record, and Sensitive modes. Keep CLI commands on the same named session.
 
 ## Core Workflow
 
@@ -281,23 +281,29 @@ gsd-browser session-summary                        # Diagnostic summary of curre
 gsd-browser debug-bundle                           # Full debug bundle: screenshot + logs + timeline + a11y tree
 ```
 
-### Live Viewer & Narration
+### Live Viewer & Workbench
 
-The live viewer is a localhost screen-sharing surface for the active browser session. Browser actions still run through CLI commands. The viewer displays live frames, narrated action history, ref overlays, target rings, click ripples, failure markers, and page-following across navigation or tab changes.
+The live viewer is a localhost screen-sharing and control surface for the active browser session. It prints or opens a tokenized URL bound to the session, viewer id, local origin, expiry, and capabilities. The viewer displays live frames, narrated action history, ref overlays, target rings, click ripples, failure markers, and page-following across navigation or tab changes.
 
 ```bash
 gsd-browser view                                   # Open the live viewer
-gsd-browser view --print-only                      # Print URL only
+gsd-browser view --print-only                      # Print tokenized URL only
+gsd-browser view --interactive                     # Interactive local workbench
 gsd-browser view --history                         # Open history-focused viewer
 gsd-browser view --history --print-only            # Print history URL only
 
 gsd-browser goal "Find the checkout button"        # Set viewer goal banner
 gsd-browser goal --clear                           # Clear goal banner
 
+gsd-browser control-state                          # Show shared owner/mode/version
+gsd-browser takeover                               # Give page input to the viewer
+gsd-browser release-control                        # Return page input to the agent
 gsd-browser pause                                  # Pause before next narrated action
 gsd-browser resume                                 # Resume actions
 gsd-browser step                                   # Allow one action, then pause
 gsd-browser abort                                  # Abort next gated action
+gsd-browser sensitive-on                           # Local human control with redaction
+gsd-browser sensitive-off                          # Leave sensitive mode
 ```
 
 Use one named session for the whole shared-screen flow:
@@ -312,13 +318,47 @@ Viewer controls:
 
 | Control | Effect |
 |---------|--------|
-| Pause | Blocks before the next narrated action |
+| Control | Forwards pointer, wheel, keyboard, text, and paste input to Chrome |
+| Annotate | Creates point annotations without forwarding page input |
+| Record | Starts or stops a local recording bundle |
+| Sensitive | Keeps local viewer control active and applies redaction policy |
+| Pause | Blocks agent page input |
 | Resume | Allows actions to continue |
 | Step | Allows one action, then returns to paused mode |
 | Abort | Aborts the next gated action |
 | Refs overlay | Shows or hides target boxes/labels |
 
 Keyboard shortcuts: Space pauses/resumes, Right Arrow steps, Escape aborts, `R` toggles refs.
+
+Risky visible targets such as destructive labels, payment actions, OAuth grants, credential entry, file transfer, production/admin surfaces, and cross-origin navigation produce an approval banner. Approval dispatches the exact pending command stored by the daemon.
+
+Annotations:
+
+```bash
+gsd-browser annotations
+gsd-browser annotation-get <id>
+gsd-browser annotation-clear <id>
+gsd-browser annotation-clear --all
+gsd-browser annotation-resolve <id>
+gsd-browser annotation-export --output annotations.json
+gsd-browser annotation-request "Select the button to restyle"
+```
+
+Recording bundles:
+
+```bash
+gsd-browser record-start --name checkout-bug
+gsd-browser record-stop
+gsd-browser record-pause
+gsd-browser record-resume
+gsd-browser recordings
+gsd-browser recording-get <id>
+gsd-browser recording-export <id> --output <path>
+gsd-browser recording-discard <id>
+gsd-browser recording-validate <id-or-path> --json
+```
+
+Viewer annotations and recording bundles are local daemon artifacts. Recording manifests use `BrowserArtifactBundleV1`, ordered JSONL events, redaction metadata, and local artifact directories under the browser state path.
 
 Use `--no-narration-delay` for fast agent-only runs that keep narration events/history without lead-time sleeps:
 

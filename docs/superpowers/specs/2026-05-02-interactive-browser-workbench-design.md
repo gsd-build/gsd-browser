@@ -113,7 +113,7 @@ Capability mapping:
 - `export`: bundle, log, and annotation export
 - `sensitive`: sensitive mode entry and exit
 
-Viewer HTML responses include `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and CSP `default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; frame-ancestors 'none'; base-uri 'none'`. The viewer reads the token into memory and removes the token from the address bar with `history.replaceState`.
+Viewer HTML responses include `Referrer-Policy: no-referrer`, `Cache-Control: no-store`, and a nonce-based CSP with `default-src 'self'`, `connect-src 'self'`, `img-src 'self' data: blob:`, `frame-ancestors 'none'`, and `base-uri 'none'`. The viewer reads the token into memory and removes the token from the address bar with `history.replaceState`.
 
 Rejected requests produce forensic events with reason codes:
 
@@ -598,7 +598,7 @@ gsd-browser view --interactive
 gsd-browser view --history
 ```
 
-Interactive mode is enabled by default for local viewers with a valid token. `--history` remains read-focused.
+`view` opens an authenticated local workbench URL. `view --print-only` prints the tokenized URL for another browser tool. Interactive mode is enabled by default for local viewers with a valid token. `--history` remains read-focused.
 
 ### Control
 
@@ -614,6 +614,8 @@ gsd-browser sensitive-on
 gsd-browser sensitive-off
 ```
 
+The shared control state reports owner, mode, `controlVersion`, `frameSeq`, sensitive status, expiry, requester, and reason. Viewer-originated page input includes the current `controlVersion` and `frameSeq`; stale input rejects before ownership checks.
+
 ### Annotation
 
 ```bash
@@ -626,7 +628,7 @@ gsd-browser annotation-export --output annotations.json
 gsd-browser annotation-request "Select the button to restyle"
 ```
 
-`annotation-request` creates a pending request, broadcasts it to connected viewers, blocks until an annotation is submitted or timeout expires, and returns annotation JSON. If no viewer is connected, it exits non-zero with `viewer_not_connected`.
+`annotation-request` creates a pending annotation prompt for connected viewers. Point annotations include viewport coordinates, page URL/title, viewer id, status, partial reasons, and sensitive redaction markers.
 
 ### Recording
 
@@ -641,6 +643,8 @@ gsd-browser recording-export <id> --output <path>
 gsd-browser recording-discard <id>
 gsd-browser recording-validate <id|path> --json
 ```
+
+Recording bundles are local daemon artifacts. `record-start` creates the recording directory, `record-stop` writes `manifest.json`, and `recording-validate` accepts either a recording id under the daemon state path or an explicit bundle path. Events are ordered JSONL entries with start, page-effect, and stop boundaries.
 
 ## Page State Tracking
 

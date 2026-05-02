@@ -787,7 +787,7 @@ dependencies = [
 
 [[package]]
 name = "gsd-browser"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "aes-gcm",
  "argon2",
@@ -823,7 +823,7 @@ dependencies = [
 
 [[package]]
 name = "gsd-browser-common"
-version = "0.1.22"
+version = "0.1.23"
 dependencies = [
  "dirs",
  "serde",

@@ -133,7 +133,7 @@ fn cloud_methods_manifest_contains_known_methods() {
     let manifest: serde_json::Value =
         serde_json::from_slice(&output.stdout).expect("manifest json");
     assert_eq!(manifest["manifestVersion"], 1);
-    assert_eq!(manifest["runtimeMinVersion"], "0.1.20");
+    assert_eq!(manifest["runtimeMinVersion"], "0.1.23");
     assert_eq!(manifest["input"]["coordinateSpace"], "viewport_css");
     assert_eq!(manifest["identity"]["localFirst"], true);
 
