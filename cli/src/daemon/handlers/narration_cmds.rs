@@ -205,8 +205,9 @@ pub async fn handle_record_start(state: &DaemonState, params: &Value) -> Result<
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or("recording");
+    let session_id = state.session.session_name.as_deref().unwrap_or("default");
     let mut store = state.recordings.lock().await;
-    let session = store.start(name)?;
+    let session = store.start(name, session_id)?;
     store.record_event(crate::daemon::view::recording::RecordingEventInput {
         source: "cli".to_string(),
         owner: "agent".to_string(),

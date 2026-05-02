@@ -2081,11 +2081,63 @@ fn format_text_goal(value: &serde_json::Value) -> String {
 }
 
 fn format_text_control(value: &serde_json::Value) -> String {
-    let control = value
-        .get("control")
+    if let Some(control) = value.get("control").and_then(|value| value.as_str()) {
+        return format!("Control: {control}");
+    }
+
+    let mode = value
+        .get("mode")
         .and_then(|value| value.as_str())
         .unwrap_or("unknown");
-    format!("Control: {control}")
+    let owner = value
+        .get("owner")
+        .and_then(|value| value.as_str())
+        .unwrap_or("unknown");
+    let sensitive = value
+        .get("sensitive")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false);
+    let version = value
+        .get("controlVersion")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let frame_seq = value
+        .get("frameSeq")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+
+    format!(
+        "Control: {mode} · owner {owner} · sensitive {} · version {version} · frame {frame_seq}",
+        if sensitive { "on" } else { "off" }
+    )
+}
+
+#[cfg(test)]
+mod cli_output_tests {
+    use super::format_text_control;
+    use serde_json::json;
+
+    #[test]
+    fn control_formatter_prints_shared_control_state() {
+        let text = format_text_control(&json!({
+            "owner": "agent",
+            "mode": "agent-running",
+            "sensitive": false,
+            "controlVersion": 4,
+            "frameSeq": 12
+        }));
+
+        assert_eq!(
+            text,
+            "Control: agent-running · owner agent · sensitive off · version 4 · frame 12"
+        );
+    }
+
+    #[test]
+    fn control_formatter_preserves_legacy_control_shape() {
+        let text = format_text_control(&json!({ "control": "paused" }));
+        assert_eq!(text, "Control: paused");
+    }
 }
 
 async fn cmd_session_summary(cli: &Cli) -> CmdResult {

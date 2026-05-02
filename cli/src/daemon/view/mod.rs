@@ -113,8 +113,10 @@ pub async fn start_for_session(
 
     let cap_page_rx = active_page_rx.clone();
     let cap_tx = frames_tx.clone();
+    let cap_state = state.clone();
     let capture_task = tokio::spawn(async move {
-        crate::daemon::view::capture::run_capture_manager(cap_page_rx, cap_tx).await;
+        crate::daemon::view::capture::run_capture_manager(cap_page_rx, cap_tx, Some(cap_state))
+            .await;
     });
 
     let refs_page_rx = active_page_rx.clone();

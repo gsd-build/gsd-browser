@@ -286,8 +286,12 @@ pub async fn handle_viewer_command(
             let mut store = state.daemon_state.recordings.lock().await;
             match command.action.as_str() {
                 "start" => {
+                    let session_id = state.session_id.clone();
                     store
-                        .start(command.name.as_deref().unwrap_or("viewer-flow"))
+                        .start(
+                            command.name.as_deref().unwrap_or("viewer-flow"),
+                            &session_id,
+                        )
                         .map_err(|message| {
                             rejected(
                                 Some(cmd.command_id.clone()),
