@@ -1,5 +1,13 @@
 # gsd-browser
 
+> [!IMPORTANT]
+> **This repository has moved.**
+>
+> Active development, releases, issues, and current installation instructions now live at
+> **https://github.com/open-gsd/gsd-browser**.
+>
+> Please use the OpenGSD repository for the current CLI, npm package, release assets, and docs.
+
 Native Rust browser automation CLI for Chrome/Chromium via CDP. `gsd-browser` keeps a persistent background daemon, auto-starts on first use, and exposes 92 top-level commands for navigation, interaction, authenticated live viewing, annotations, recording bundles, snapshots with versioned refs, assertions, structured extraction, network control, visual diffing, tracing, and stateful auth flows.
 
 Built for AI agents, CI pipelines, and developers who want deterministic browser control without adopting a full browser test framework.
@@ -17,7 +25,7 @@ Run `gsd-browser update` to install the current release.
 
 ### Pre-built binaries
 
-Download from [GitHub Releases](https://github.com/gsd-build/gsd-browser/releases):
+Download current builds from [OpenGSD GitHub Releases](https://github.com/open-gsd/gsd-browser/releases):
 
 | Platform | Asset |
 |----------|-------|
@@ -29,14 +37,14 @@ Download from [GitHub Releases](https://github.com/gsd-build/gsd-browser/release
 ### Build from source
 
 ```bash
-git clone https://github.com/gsd-build/gsd-browser.git
+git clone https://github.com/open-gsd/gsd-browser.git
 cd gsd-browser
 cargo install --path cli
 ```
 
 ### Package registries
 
-The public npm package (`@gsd-build/gsd-browser`) and crates.io package (`gsd-browser`) are not published yet. Use the installer, GitHub release assets, or a source build.
+Use the current npm package (`@opengsd/gsd-browser`), OpenGSD GitHub release assets, or a source build from the OpenGSD repository.
 
 ## Quick Start
 
