@@ -1,5 +1,7 @@
 # gsd-browser
 
+[![AgentShield Security](https://merx.help/badge/A+.svg)](https://merx.help/shield)
+
 Native Rust browser automation CLI for Chrome/Chromium via CDP. `gsd-browser` keeps a persistent background daemon, auto-starts on first use, and exposes 92 top-level commands for navigation, interaction, authenticated live viewing, annotations, recording bundles, snapshots with versioned refs, assertions, structured extraction, network control, visual diffing, tracing, and stateful auth flows.
 
 Built for AI agents, CI pipelines, and developers who want deterministic browser control without adopting a full browser test framework.
